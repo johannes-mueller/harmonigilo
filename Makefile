@@ -2,7 +2,7 @@
 OPTIMIZATIONS ?= -msse -msse2 -mfpmath=sse -ffast-math -fomit-frame-pointer -O3 -fno-finite-math-only
 PREFIX ?= /usr/local
 CC = gcc
-CFLAGS ?= $(OPTIMIZATIONS) -fPIC -Wall
+CFLAGS ?= -g -fPIC -Wall
 
 STRIP?=strip
 STRIPFLAGS?=-s
@@ -11,7 +11,8 @@ cs_VERSION?=$(shell git describe --tags HEAD 2>/dev/null | sed 's/-g.*$$//;s/^v/
 ###############################################################################
 
 LV2DIR ?= $(PREFIX)/lib/lv2
-LOADLIBES=-lm
+LOADLIBES=-lm -l:librubberband.a -l:libfftw3.a
+#LOADLIBES+=`pkg-config --libs rubberband`
 LV2NAME=harmonigilo
 BUNDLE=harmonigilo.lv2
 BUILDDIR=build/
@@ -71,7 +72,7 @@ $(BUILDDIR)$(LV2NAME).ttl: Makefile lv2ttl/$(LV2NAME).ttl.in
 
 DSP_DEPS = $(DSP_SRC)
 
-$(BUILDDIR)$(LV2NAME)$(LIB_EXT): $(DSP_DEPS) Makefile
+$(BUILDDIR)$(LV2NAME)$(LIB_EXT): $(CPP_OBJ) $(DSP_DEPS) Makefile
 	@mkdir -p $(BUILDDIR)
 	$(CC) $(CFLAGS) \
 	  -o $(BUILDDIR)$(LV2NAME)$(LIB_EXT) $(DSP_SRC) \
