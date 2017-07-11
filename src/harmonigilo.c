@@ -80,7 +80,7 @@ typedef struct {
 
 	SampleBuffer* retrieve_buffer;
 	SampleBuffer* pitch_buffer_A;
-	size_t pbufA_avail;
+	uint32_t pbufA_avail;
 
 	double rate;
 
@@ -150,6 +150,43 @@ activate(LV2_Handle instance)
 	hrm->buffer_pos = 0;
 }
 
+static void
+pitch_shift(const float* const input, uint32_t n_samples, uint32_t* samples_available, RubberBandState pitcher, SampleBuffer* retr, SampleBuffer* out)
+{
+	uint32_t processed = 0;
+
+	const float* proc_ptr = input;
+	float* out_ptr = out->data;
+
+	while (processed < n_samples) {
+		uint32_t in_chunk_size = rubberband_get_samples_required(pitcher);
+		uint32_t samples_left = n_samples-processed;
+
+		if (samples_left < in_chunk_size) {
+			in_chunk_size = samples_left;
+		}
+
+		rubberband_process(pitcher, &proc_ptr, in_chunk_size, 0);
+
+		processed += in_chunk_size;
+		proc_ptr += in_chunk_size;
+
+		uint32_t avail = rubberband_available(pitcher);
+
+		if (avail+*samples_available > n_samples) {
+			avail = n_samples - *samples_available;
+		}
+		uint32_t out_chunk_size = rubberband_retrieve(pitcher, &(retr->data), avail);
+
+		//memcpy (out_ptr, retr, out_chunk_size * sizeof(float));
+		for (unsigned int i=0; i<out_chunk_size; i++) {
+			out_ptr[i] = retr->data[i];
+		}
+
+		out_ptr += out_chunk_size;
+		*samples_available += out_chunk_size;
+	}
+}
 
 static void
 run(LV2_Handle instance, uint32_t n_samples)
@@ -160,47 +197,13 @@ run(LV2_Handle instance, uint32_t n_samples)
 
 	const float* const input  = hrm->input;
 	float* const output = hrm->output;
-	uint32_t processed = 0;
 
 	const float scaleA = pow(2.0, (*hrm->pitchA)/1200);
 
 	rubberband_set_pitch_scale(hrm->pitcherA, scaleA);
 
-	const float* proc_ptr = input;
-	float* out_ptr = hrm->pitch_buffer_A->data;
 
-	int cnt = 0;
-	static int inst = 0;
-	inst++;
-	while (processed < n_samples) {
-		//printf ("step: %d: instance: %d; processed: %d; ", cnt++, inst, processed);
-		uint32_t in_chunk_size = rubberband_get_samples_required(hrm->pitcherA);
-		uint32_t samples_left = n_samples-processed;
-		//printf("required: %d; left: %d ",  in_chunk_size, samples_left);
-		if (samples_left < in_chunk_size) {
-			in_chunk_size = samples_left;
-		}
-		//printf("in_chunk_size: %d ", in_chunk_size);
-		rubberband_process(hrm->pitcherA, &proc_ptr, in_chunk_size, 0);
-
-		processed += in_chunk_size;
-		proc_ptr += in_chunk_size;
-		//printf("-- ");
-		uint32_t avail = rubberband_available(hrm->pitcherA);
-		//printf ("avail: %d; ", avail);
-		if (avail+hrm->pbufA_avail > n_samples) {
-			avail = n_samples - hrm->pbufA_avail;
-		}
-		uint32_t out_chunk_size = rubberband_retrieve(hrm->pitcherA, &(hrm->retrieve_buffer->data), avail);
-		//printf ("out_chunk_size: %d; sum avail: %d\n", out_chunk_size, hrm->pbufA_avail+out_chunk_size);
-		//memcpy (out_ptr, hrm->retrieve_buffer, out_chunk_size * sizeof(float));
-		for (unsigned int i=0; i<out_chunk_size; i++) {
-			out_ptr[i] = hrm->retrieve_buffer->data[i];
-		}
-
-		out_ptr += out_chunk_size;
-		hrm->pbufA_avail += out_chunk_size;
-	}
+	pitch_shift(input, n_samples, &hrm->pbufA_avail, hrm->pitcherA, hrm->retrieve_buffer, hrm->pitch_buffer_A);
 
 	if (!hrm->pbufA_avail) {
 		return;
