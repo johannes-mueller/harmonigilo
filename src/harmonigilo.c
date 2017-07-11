@@ -188,11 +188,40 @@ pitch_shift(const float* const input, uint32_t n_samples, uint32_t* samples_avai
 	}
 }
 
+static uint32_t
+delay(const SampleBuffer* const in, uint32_t n_samples, SampleBuffer* delay_buffer, uint32_t actual_n_samples, float delay, const Harmonigilo* hrm, float* const out)
+{
+	size_t delay_samples = (size_t) rint(delay*hrm->rate/1000.0);
+	uint32_t buffer_pos = hrm->buffer_pos;
+
+	if (delay_samples >= hrm->delay_buflen) {
+		delay_samples = hrm->delay_buflen - 1;
+	}
+
+	for (uint32_t pos = 0; pos < actual_n_samples; pos++) {
+		delay_buffer->data[buffer_pos] = in->data[pos];
+
+		const uint32_t actual_pos = n_samples-actual_n_samples + pos;
+		if (delay_samples > buffer_pos) {
+			out[actual_pos] = delay_buffer->data[hrm->delay_buflen-(delay_samples-buffer_pos)];
+		} else {
+			out[actual_pos] = delay_buffer->data[buffer_pos-delay_samples];
+		}
+
+		buffer_pos++;
+		if (buffer_pos == hrm->delay_buflen) {
+			buffer_pos = 0;
+		}
+	}
+
+	return buffer_pos;
+}
+
 static void
 run(LV2_Handle instance, uint32_t n_samples)
 {
 	assert (n_samples <= 8192);
-	//printf("nsamples: %d\n", n_samples);
+
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 
 	const float* const input  = hrm->input;
@@ -214,29 +243,8 @@ run(LV2_Handle instance, uint32_t n_samples)
 		actual_n_samples = n_samples;
 	}
 
-	const float delayA = *(hrm->delayA);
+	hrm->buffer_pos = delay(hrm->pitch_buffer_A, n_samples, hrm->delay_buffer_A, actual_n_samples, *hrm->delayA, hrm, output);
 
-	size_t delay_samples = (size_t) rint(delayA*hrm->rate/1000.0);
-	if (delay_samples >= hrm->delay_buflen) {
-		delay_samples = hrm->delay_buflen - 1;
-	}
-	if (actual_n_samples != n_samples)
-		printf("actual_samples: %d, n_samples %d\n", actual_n_samples, n_samples);
-	for (uint32_t pos = 0; pos < actual_n_samples; pos++) {
-		hrm->delay_buffer_A->data[hrm->buffer_pos] = hrm->pitch_buffer_A->data[pos];
-
-		const uint32_t actual_pos = n_samples-actual_n_samples + pos;
-		if (delay_samples > hrm->buffer_pos) {
-			output[actual_pos] = hrm->delay_buffer_A->data[hrm->delay_buflen-(delay_samples-hrm->buffer_pos)];
-		} else {
-			output[actual_pos] = hrm->delay_buffer_A->data[hrm->buffer_pos-delay_samples];
-		}
-
-		hrm->buffer_pos++;
-		if (hrm->buffer_pos == hrm->delay_buflen) {
-			hrm->buffer_pos = 0;
-		}
-	}
 	hrm->pbufA_avail -= actual_n_samples;
 }
 
