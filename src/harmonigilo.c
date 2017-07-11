@@ -39,22 +39,55 @@ typedef enum {
 } PortIndex;
 
 typedef struct {
+	float* data;
+	size_t len;
+} SampleBuffer;
+
+static SampleBuffer*
+new_sample_buffer(size_t len)
+{
+	float* data = (float*)malloc(len*sizeof(float));
+	if (!data) {
+		return NULL;
+	}
+	SampleBuffer* sb = (SampleBuffer*)malloc(sizeof(SampleBuffer));
+	if (!sb) {
+		return NULL;
+	}
+	sb->data = data;
+	sb->len = len;
+	return sb;
+}
+
+static void
+delete_sample_buffer(SampleBuffer* sb)
+{
+	free(sb->data);
+	free(sb);
+}
+
+static void
+reset_sample_buffer(SampleBuffer* sb)
+{
+	bzero(sb->data, sb->len*sizeof(float));
+}
+
+typedef struct {
 	const float* delayA;
 	const float* pitchA;
 	const float* input;
 	float* output;
 
-	float* retrieve_buffer;
-
-	float* pitch_buffer_A;
+	SampleBuffer* retrieve_buffer;
+	SampleBuffer* pitch_buffer_A;
 	size_t pbufA_avail;
 
 	double rate;
 
-	size_t buflen;
+	size_t delay_buflen;
 	size_t buffer_pos;
 
-	float* buffer1;
+	SampleBuffer* delay_buffer_A;
 
 	RubberBandState pitcherA;
 } Harmonigilo;
@@ -66,28 +99,11 @@ instantiate(const LV2_Descriptor* descriptor,
 	    const char* bundle_path,
 	    const LV2_Feature* const* features)
 {
-	size_t buflen = (size_t) rint (rate * MAXDELAY / 1000.0);
-	float* buf = (float*)malloc(sizeof(float) * buflen);
-
-	if (!buf) {
-		return NULL;
-	}
-
-	float* rbuf = (float*)malloc(sizeof(float) * 8192);
-	if (!rbuf) {
-		return NULL;
-	}
-
-	float* pbufA = (float*)malloc(sizeof(float) * 8192);
-	if (!pbufA) {
-		return NULL;
-	}
-
 	Harmonigilo* hrm = (Harmonigilo*)malloc(sizeof(Harmonigilo));
-	hrm->retrieve_buffer = rbuf;
-	hrm->pitch_buffer_A = pbufA;
-	hrm->buflen = buflen;
-	hrm->buffer1 = buf;
+	hrm->retrieve_buffer = new_sample_buffer(8192);
+	hrm->pitch_buffer_A = new_sample_buffer(8192);
+	hrm->delay_buflen = (size_t) rint (rate * MAXDELAY / 1000.0);
+	hrm->delay_buffer_A = new_sample_buffer(hrm->delay_buflen);
 	hrm->rate = rate;
 
 	hrm->pitcherA = rubberband_new((unsigned int) rint(rate), 1,
@@ -127,9 +143,9 @@ activate(LV2_Handle instance)
 {
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 	printf("Activate called\n");
-	bzero(hrm->buffer1, sizeof(float) * hrm->buflen);
-	bzero(hrm->retrieve_buffer, sizeof(float) * 8192);
-	bzero(hrm->pitch_buffer_A, sizeof(float) * 8192);
+	reset_sample_buffer(hrm->delay_buffer_A);
+	reset_sample_buffer(hrm->retrieve_buffer);
+	reset_sample_buffer(hrm->pitch_buffer_A);
 	hrm->pbufA_avail = 0;
 	hrm->buffer_pos = 0;
 }
@@ -151,7 +167,7 @@ run(LV2_Handle instance, uint32_t n_samples)
 	rubberband_set_pitch_scale(hrm->pitcherA, scaleA);
 
 	const float* proc_ptr = input;
-	float* out_ptr = hrm->pitch_buffer_A;
+	float* out_ptr = hrm->pitch_buffer_A->data;
 
 	int cnt = 0;
 	static int inst = 0;
@@ -175,11 +191,11 @@ run(LV2_Handle instance, uint32_t n_samples)
 		if (avail+hrm->pbufA_avail > n_samples) {
 			avail = n_samples - hrm->pbufA_avail;
 		}
-		uint32_t out_chunk_size = rubberband_retrieve(hrm->pitcherA, &(hrm->retrieve_buffer), avail);
+		uint32_t out_chunk_size = rubberband_retrieve(hrm->pitcherA, &(hrm->retrieve_buffer->data), avail);
 		//printf ("out_chunk_size: %d; sum avail: %d\n", out_chunk_size, hrm->pbufA_avail+out_chunk_size);
 		//memcpy (out_ptr, hrm->retrieve_buffer, out_chunk_size * sizeof(float));
 		for (unsigned int i=0; i<out_chunk_size; i++) {
-			out_ptr[i] = hrm->retrieve_buffer[i];
+			out_ptr[i] = hrm->retrieve_buffer->data[i];
 		}
 
 		out_ptr += out_chunk_size;
@@ -198,23 +214,23 @@ run(LV2_Handle instance, uint32_t n_samples)
 	const float delayA = *(hrm->delayA);
 
 	size_t delay_samples = (size_t) rint(delayA*hrm->rate/1000.0);
-	if (delay_samples >= hrm->buflen) {
-		delay_samples = hrm->buflen - 1;
+	if (delay_samples >= hrm->delay_buflen) {
+		delay_samples = hrm->delay_buflen - 1;
 	}
 	if (actual_n_samples != n_samples)
 		printf("actual_samples: %d, n_samples %d\n", actual_n_samples, n_samples);
 	for (uint32_t pos = 0; pos < actual_n_samples; pos++) {
-		hrm->buffer1[hrm->buffer_pos] = hrm->pitch_buffer_A[pos];
+		hrm->delay_buffer_A->data[hrm->buffer_pos] = hrm->pitch_buffer_A->data[pos];
 
 		const uint32_t actual_pos = n_samples-actual_n_samples + pos;
 		if (delay_samples > hrm->buffer_pos) {
-			output[actual_pos] = hrm->buffer1[hrm->buflen-(delay_samples-hrm->buffer_pos)];
+			output[actual_pos] = hrm->delay_buffer_A->data[hrm->delay_buflen-(delay_samples-hrm->buffer_pos)];
 		} else {
-			output[actual_pos] = hrm->buffer1[hrm->buffer_pos-delay_samples];
+			output[actual_pos] = hrm->delay_buffer_A->data[hrm->buffer_pos-delay_samples];
 		}
 
 		hrm->buffer_pos++;
-		if (hrm->buffer_pos == hrm->buflen) {
+		if (hrm->buffer_pos == hrm->delay_buflen) {
 			hrm->buffer_pos = 0;
 		}
 	}
@@ -230,10 +246,10 @@ static void
 cleanup(LV2_Handle instance)
 {
 	Harmonigilo* hrm = (Harmonigilo*)instance;
-	free(hrm->retrieve_buffer);
-	free(hrm->pitch_buffer_A);
 	rubberband_delete(hrm->pitcherA);
-	free(hrm->buffer1);
+	delete_sample_buffer(hrm->retrieve_buffer);
+	delete_sample_buffer(hrm->pitch_buffer_A);
+	delete_sample_buffer(hrm->delay_buffer_A);
 	free(instance);
 }
 
