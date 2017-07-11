@@ -32,13 +32,15 @@
 #define MAXDELAY 1000.0
 
 typedef enum {
-	HRM_DELAY_L = 0,
-	HRM_PITCH_L = 1,
-	HRM_DELAY_R = 2,
-	HRM_PITCH_R = 3,
-	HRM_INPUT = 4,
-	HRM_OUTPUT_L = 5,
-	HRM_OUTPUT_R = 6
+ 	HRM_DELAY_L = 1,
+	HRM_PITCH_L = 2,
+	HRM_DELAY_R = 3,
+	HRM_PITCH_R = 4,
+	HRM_PANNER_WIDTH = 5,
+	HRM_DRYWET = 6,
+	HRM_INPUT = 0,
+	HRM_OUTPUT_L = 7,
+	HRM_OUTPUT_R = 8
 } PortIndex;
 
 typedef struct {
@@ -84,6 +86,10 @@ typedef struct {
 	float* output_L;
 	float* output_R;
 
+	const float* panner_width;
+	const float* dry_wet;
+
+	SampleBuffer* copied_input;
 	SampleBuffer* retrieve_buffer;
 
 	SampleBuffer* pitch_buffer_L;
@@ -114,6 +120,7 @@ instantiate(const LV2_Descriptor* descriptor,
 	    const LV2_Feature* const* features)
 {
 	Harmonigilo* hrm = (Harmonigilo*)malloc(sizeof(Harmonigilo));
+	hrm->copied_input = new_sample_buffer(8192);
 	hrm->retrieve_buffer = new_sample_buffer(8192);
 	hrm->pitch_buffer_L = new_sample_buffer(8192);
 	hrm->pitch_buffer_R = new_sample_buffer(8192);
@@ -136,7 +143,6 @@ connect_port(LV2_Handle instance,
 	     void*      data)
 {
 	Harmonigilo* hrm = (Harmonigilo*)instance;
-
 	switch ((PortIndex)port) {
 	case HRM_DELAY_L:
 		hrm->delay_L = (const float*)data;
@@ -149,6 +155,12 @@ connect_port(LV2_Handle instance,
 		break;
 	case HRM_PITCH_R:
 		hrm->pitch_R = (const float*)data;
+		break;
+	case HRM_PANNER_WIDTH:
+		hrm->panner_width = (const float*)data;
+		break;
+	case HRM_DRYWET:
+		hrm->dry_wet = (const float*)data;
 		break;
 	case HRM_INPUT:
 		hrm->input = (const float*)data;
@@ -258,11 +270,17 @@ run(LV2_Handle instance, uint32_t n_samples)
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 
 	const float* const input  = hrm->input;
+
+	memcpy (hrm->copied_input->data, input, n_samples*sizeof(float));
+
 	float* const output_L = hrm->output_L;
 	float* const output_R = hrm->output_R;
 
 	const float scale_L = pow(2.0, (*hrm->pitch_L)/1200);
 	const float scale_R = pow(2.0, (*hrm->pitch_R)/1200);
+
+	const float dry_wet = *hrm->dry_wet;
+	const float panning = (1.0-*hrm->panner_width)/2.0;
 
 	rubberband_set_pitch_scale(hrm->pitcher_L, scale_L);
 	rubberband_set_pitch_scale(hrm->pitcher_R, scale_R);
@@ -287,6 +305,13 @@ run(LV2_Handle instance, uint32_t n_samples)
 	if (actual_n_samples > 0) {
 		hrm->buffer_pos_R = delay(hrm->pitch_buffer_R, n_samples, hrm->delay_buffer_R, actual_n_samples, *hrm->delay_R, hrm->buffer_pos_R, hrm, output_R);
 		hrm->pbuf_R_avail -= actual_n_samples;
+	}
+
+	for (uint32_t i=0; i < n_samples; i++) {
+		const float l = output_L[i];
+		const float r = output_R[i];
+		output_L[i] = (l*panning + r*(1.0-panning))*dry_wet + hrm->copied_input->data[i]*(1.0-dry_wet);
+		output_R[i] = (r*panning + l*(1.0-panning))*dry_wet + hrm->copied_input->data[i]*(1.0-dry_wet);
 	}
 }
 
