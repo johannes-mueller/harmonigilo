@@ -11,7 +11,7 @@ cs_VERSION?=$(shell git describe --tags HEAD 2>/dev/null | sed 's/-g.*$$//;s/^v/
 ###############################################################################
 
 LV2DIR ?= $(PREFIX)/lib/lv2
-LOADLIBES=-lm -l:librubberband.a -l:libfftw3.a
+LOADLIBES=-lm -l:librubberband.a -l:libfftw3.a -l:libutil.a -lsamplerate
 #LOADLIBES+=`pkg-config --libs rubberband`
 LV2NAME=harmonigilo
 BUNDLE=harmonigilo.lv2
