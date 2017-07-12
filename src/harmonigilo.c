@@ -32,15 +32,16 @@
 #define MAXDELAY 1000.0
 
 typedef enum {
- 	HRM_DELAY_L = 1,
-	HRM_PITCH_L = 2,
-	HRM_DELAY_R = 3,
-	HRM_PITCH_R = 4,
-	HRM_PANNER_WIDTH = 5,
-	HRM_DRYWET = 6,
-	HRM_INPUT = 0,
-	HRM_OUTPUT_L = 7,
-	HRM_OUTPUT_R = 8
+ 	HRM_DELAY_L = 0,
+	HRM_PITCH_L = 1,
+	HRM_DELAY_R = 2,
+	HRM_PITCH_R = 3,
+	HRM_PANNER_WIDTH = 4,
+	HRM_DRYWET = 5,
+	HRM_LATENCY = 6,
+	HRM_INPUT = 7,
+	HRM_OUTPUT_L = 8,
+	HRM_OUTPUT_R = 9
 } PortIndex;
 
 typedef struct {
@@ -82,12 +83,12 @@ typedef struct {
 	const float* pitch_L;
 	const float* delay_R;
 	const float* pitch_R;
+	const float* panner_width;
+	const float* dry_wet;
+	float* latency;
 	const float* input;
 	float* output_L;
 	float* output_R;
-
-	const float* panner_width;
-	const float* dry_wet;
 
 	SampleBuffer* copied_input;
 	SampleBuffer* retrieve_buffer;
@@ -162,6 +163,9 @@ connect_port(LV2_Handle instance,
 	case HRM_DRYWET:
 		hrm->dry_wet = (const float*)data;
 		break;
+	case HRM_LATENCY:
+		hrm->latency = (float*)data;
+		break;
 	case HRM_INPUT:
 		hrm->input = (const float*)data;
 		break;
@@ -234,10 +238,16 @@ pitch_shift(const float* const input, uint32_t n_samples, uint32_t* samples_avai
 }
 
 static uint32_t
-delay(const SampleBuffer* const in, uint32_t n_samples, SampleBuffer* delay_buffer, uint32_t actual_n_samples, float delay, uint32_t buf_pos, const Harmonigilo* hrm, float* const out)
+delay(const SampleBuffer* const in, uint32_t n_samples,
+      SampleBuffer* delay_buffer, uint32_t actual_n_samples,
+      float delay, uint32_t latency, uint32_t buf_pos,
+      const Harmonigilo* hrm, float* const out)
 {
 	uint32_t buffer_pos = buf_pos;
-	size_t delay_samples = (size_t) rint(delay*hrm->rate/1000.0);
+	const float rate = hrm->rate;
+
+	printf("%d, %d\n", (int) rint(delay*rate/1000.0), latency);
+	uint32_t delay_samples = (int) rint(delay*rate/1000.0) - latency;
 
 	if (delay_samples >= hrm->delay_buflen) {
 		delay_samples = hrm->delay_buflen - 1;
@@ -279,6 +289,19 @@ run(LV2_Handle instance, uint32_t n_samples)
 	const float scale_L = pow(2.0, (*hrm->pitch_L)/1200);
 	const float scale_R = pow(2.0, (*hrm->pitch_R)/1200);
 
+	int latency_L = rubberband_get_latency(hrm->pitcher_L);
+	int latency_R = rubberband_get_latency(hrm->pitcher_R);
+
+	if (latency_L > latency_R) {
+		*hrm->latency = latency_L;
+		latency_R -= latency_L;
+		latency_L = 0;
+	} else {
+		*hrm->latency = latency_R;
+		latency_L -= latency_R;
+		latency_R = 0;
+	}
+
 	const float dry_wet = *hrm->dry_wet;
 	const float panning = (1.0-*hrm->panner_width)/2.0;
 
@@ -294,7 +317,7 @@ run(LV2_Handle instance, uint32_t n_samples)
 		actual_n_samples = n_samples;
 	}
 	if (actual_n_samples > 0) {
-		hrm->buffer_pos_L = delay(hrm->pitch_buffer_L, n_samples, hrm->delay_buffer_L, actual_n_samples, *hrm->delay_L, hrm->buffer_pos_L, hrm, output_L);
+		hrm->buffer_pos_L = delay(hrm->pitch_buffer_L, n_samples, hrm->delay_buffer_L, actual_n_samples, *hrm->delay_L, latency_L, hrm->buffer_pos_L, hrm, output_L);
 		hrm->pbuf_L_avail -= actual_n_samples;
 	}
 
@@ -303,7 +326,7 @@ run(LV2_Handle instance, uint32_t n_samples)
 		actual_n_samples = n_samples;
 	}
 	if (actual_n_samples > 0) {
-		hrm->buffer_pos_R = delay(hrm->pitch_buffer_R, n_samples, hrm->delay_buffer_R, actual_n_samples, *hrm->delay_R, hrm->buffer_pos_R, hrm, output_R);
+		hrm->buffer_pos_R = delay(hrm->pitch_buffer_R, n_samples, hrm->delay_buffer_R, actual_n_samples, *hrm->delay_R, latency_R, hrm->buffer_pos_R, hrm, output_R);
 		hrm->pbuf_R_avail -= actual_n_samples;
 	}
 
