@@ -27,22 +27,7 @@
 
 #include "lv2/lv2plug.in/ns/lv2core/lv2.h"
 
-#define HRM_URI "http://johannes-mueller.org/oss/lv2/harmonigilo"
-
-#define MAXDELAY 1000.0
-
-typedef enum {
- 	HRM_DELAY_L = 0,
-	HRM_PITCH_L = 1,
-	HRM_DELAY_R = 2,
-	HRM_PITCH_R = 3,
-	HRM_PANNER_WIDTH = 4,
-	HRM_DRYWET = 5,
-	HRM_LATENCY = 6,
-	HRM_INPUT = 7,
-	HRM_OUTPUT_L = 8,
-	HRM_OUTPUT_R = 9
-} PortIndex;
+#include "harmonigilo.h"
 
 typedef struct {
 	float* data;
@@ -246,7 +231,6 @@ delay(const SampleBuffer* const in, uint32_t n_samples,
 	uint32_t buffer_pos = buf_pos;
 	const float rate = hrm->rate;
 
-	printf("%d, %d\n", (int) rint(delay*rate/1000.0), latency);
 	uint32_t delay_samples = (int) rint(delay*rate/1000.0) - latency;
 
 	if (delay_samples >= hrm->delay_buflen) {

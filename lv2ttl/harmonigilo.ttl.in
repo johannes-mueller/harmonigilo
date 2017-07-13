@@ -18,13 +18,18 @@
 	foaf:mbox <mailto:github@johannes-mueller.org> ;
 	foaf:homepage <http://johannes-mueller.org/> .
 
+<http://johannes-mueller.org/oss/lv2/@LV2NAME@#ui>
+	a ui:X11UI ;
+	lv2:requiredFeature ui:idleInterface ;
+	lv2:extensionData ui:idleInterface .
+
 <http://johannes-mueller.org/oss/lv2/@LV2NAME@>
 	a lv2:Plugin ;
 	doap:name "Harmonigilo" ;
 	doap:license <http://usefulinc.com/doap/licenses/gpl> ;
 	doap:maintainer <http://johannes-mueller.org> ;
 	lv2:optionalFeature lv2:hardRTCapable ;
-
+	ui:ui <http://johannes-mueller.org/oss/lv2/@LV2NAME@#ui> ;
 	lv2:port [
 		a lv2:InputPort ,
 			lv2:ControlPort ;
