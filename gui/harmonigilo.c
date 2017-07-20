@@ -438,10 +438,12 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_right), 3,4, 0,1, 0,20,RTK_EXPAND,RTK_SHRINK);
 
 	ui->pitch_L = make_sized_robtk_dial(-100.0, 100.0, 1.0);
+	robtk_dial_set_default(ui->pitch_L, 0.0);
 	robtk_dial_set_callback(ui->pitch_L, cb_set_pitch_L, ui);
 	robtk_dial_annotation_callback(ui->pitch_L, dial_annotation_pitch, ui);
 	robtk_dial_set_surface(ui->pitch_L, ui->bg_pitch_L);
 	ui->pitch_R = make_sized_robtk_dial(-100.0, 100.0, 1.0);
+	robtk_dial_set_default(ui->pitch_R, 0.0);
 	robtk_dial_set_callback(ui->pitch_R, cb_set_pitch_R, ui);
 	robtk_dial_annotation_callback(ui->pitch_R, dial_annotation_pitch, ui);
 	robtk_dial_set_surface(ui->pitch_R, ui->bg_pitch_R);
@@ -455,10 +457,12 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_pitch_R), 4,5, 1,2, 0,0,RTK_EXPAND,RTK_SHRINK) ;
 
 	ui->delay_L = make_sized_robtk_dial(0.0, 50.0, 1.0);
+	robtk_dial_set_default(ui->delay_L, 0.0);
 	robtk_dial_set_callback(ui->delay_L, cb_set_delay_L, ui);
 	robtk_dial_annotation_callback(ui->delay_L, dial_annotation_ms, ui);
 	robtk_dial_set_surface(ui->delay_L, ui->bg_delay_L);
 	ui->delay_R = make_sized_robtk_dial(0.0, 50.0, 1.0);
+	robtk_dial_set_default(ui->delay_R, 0.0);
 	robtk_dial_set_callback(ui->delay_R, cb_set_delay_R, ui);
 	robtk_dial_annotation_callback(ui->delay_R, dial_annotation_ms, ui);
 	robtk_dial_set_surface(ui->delay_R, ui->bg_delay_R);
