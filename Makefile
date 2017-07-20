@@ -161,7 +161,7 @@ else
 LV2CFLAGS += -DPTW32_STATIC_LIB
 endif
 
-LOADLIBES=-lm -l:librubberband.a -l:libfftw3.a -l:libutil.a -lsamplerate
+LOADLIBES=-lm -l:librubberband.a -l:libfftw3.a -l:libutil.a -L/opt/kxstudio/lib -l:libsamplerate.a
 
 GTKUICFLAGS+= $(LV2CFLAGS) `pkg-config --cflags gtk+-2.0 cairo pango`
 GTKUILIBS+=`pkg-config --libs gtk+-2.0 cairo pango`
