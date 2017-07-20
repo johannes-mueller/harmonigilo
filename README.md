@@ -19,6 +19,8 @@ making them sound more voluminous. This is achieved by the following measures:
 
 * The final stereo signal is blended with the input signal
 
+* The GUI uses RobTk by Robin Gareus aka x42
+
 
 ## Usage
 So far there's only the generic UI. There are the following controls
@@ -36,8 +38,6 @@ So far there's only the generic UI. There are the following controls
 ## Todo
 
 * Test'n'Debug
-
-* Write a GUI
 
 * Make it run on Windows and Mac (I probably won't do it, so PRs welcome)
 
