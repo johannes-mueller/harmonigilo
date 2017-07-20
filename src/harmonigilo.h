@@ -18,9 +18,7 @@
 #ifndef HRM_H
 #define HRM_H
 
-#define HRM_URI "http://johannes-mueller.org/oss/lv2/harmonigilo"
-#define HRM_UI_URI "http://johannes-mueller.org/oss/lv2/harmonigilo#ui"
-
+#define HRM_URI "http://johannes-mueller.org/oss/lv2/harmonigilo#"
 
 #define MAXDELAY 1000.0
 

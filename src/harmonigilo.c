@@ -348,7 +348,7 @@ extension_data(const char* uri)
 }
 
 static const LV2_Descriptor descriptor = {
-	HRM_URI,
+	HRM_URI "lv2",
 	instantiate,
 	connect_port,
 	activate,
