@@ -153,7 +153,6 @@ GTKUICFLAGS+=-DHAVE_IDLE_IFACE
 LV2UIREQ+=lv2:requiredFeature ui:idleInterface; lv2:extensionData ui:idleInterface;
 
 # add library dependent flags and libs
-LV2CFLAGS += `pkg-config --cflags lv2 ltc`
 LV2CFLAGS += $(OPTIMIZATIONS) -DVERSION="\"$(harmonigilo_VERSION)\""
 ifeq ($(XWIN),)
 LV2CFLAGS += -fPIC -fvisibility=hidden
