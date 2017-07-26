@@ -64,38 +64,33 @@ reset_sample_buffer(SampleBuffer* sb)
 }
 
 typedef struct {
-	const float* delay_L;
-	const float* pitch_L;
-	const float* delay_R;
-	const float* pitch_R;
+	char name[16];
+	const float* delay;
+	const float* pitch;
+	float* output;
+
+	RubberBandState pitcher;
+	SampleBuffer* pitch_buffer;
+	uint32_t avail;
+
+	SampleBuffer* delay_buffer;
+	uint32_t buffer_pos;
+} Channel;
+
+typedef struct {
+	const float* input;
 	const float* panner_width;
 	const float* dry_wet;
 	float* latency;
-	const float* input;
-	float* output_L;
-	float* output_R;
 
 	SampleBuffer* copied_input;
 	SampleBuffer* retrieve_buffer;
-
-	SampleBuffer* pitch_buffer_L;
-	uint32_t pbuf_L_avail;
-
-	SampleBuffer* pitch_buffer_R;
-	uint32_t pbuf_R_avail;
 
 	double rate;
 
 	size_t delay_buflen;
 
-	size_t buffer_pos_L;
-	size_t buffer_pos_R;
-
-	SampleBuffer* delay_buffer_L;
-	SampleBuffer* delay_buffer_R;
-
-	RubberBandState pitcher_L;
-	RubberBandState pitcher_R;
+	Channel left, right;
 } Harmonigilo;
 
 
@@ -108,18 +103,28 @@ instantiate(const LV2_Descriptor* descriptor,
 	Harmonigilo* hrm = (Harmonigilo*)malloc(sizeof(Harmonigilo));
 	hrm->copied_input = new_sample_buffer(8192);
 	hrm->retrieve_buffer = new_sample_buffer(8192);
-	hrm->pitch_buffer_L = new_sample_buffer(8192);
-	hrm->pitch_buffer_R = new_sample_buffer(8192);
-	hrm->delay_buflen = (size_t) rint (rate * MAXDELAY / 1000.0);
-	hrm->delay_buffer_L = new_sample_buffer(hrm->delay_buflen);
-	hrm->delay_buffer_R = new_sample_buffer(hrm->delay_buflen);
+	hrm->left.pitch_buffer = new_sample_buffer(8192);
+	hrm->right.pitch_buffer = new_sample_buffer(8192);
+	const size_t delay_buflen = (size_t) rint (rate * MAXDELAY / 1000.0);
+	hrm->delay_buflen = delay_buflen;
+	hrm->left.delay_buffer = new_sample_buffer(delay_buflen);
+	hrm->right.delay_buffer = new_sample_buffer(delay_buflen);
 	hrm->rate = rate;
 
-	hrm->pitcher_L = rubberband_new((unsigned int) rint(rate), 1,
-				       RubberBandOptionProcessRealTime | RubberBandOptionPitchHighConsistency| RubberBandOptionPhaseIndependent | RubberBandOptionTransientsSmooth, 1.0, 1.0);
-	hrm->pitcher_R = rubberband_new((unsigned int) rint(rate), 1,
-				       RubberBandOptionProcessRealTime | RubberBandOptionPitchHighConsistency| RubberBandOptionPhaseIndependent | RubberBandOptionTransientsSmooth, 1.0, 1.0);
-	//rubberband_set_debug_level(hrm->pitcherA, 3);
+	enum RubberBandOption opt =
+		RubberBandOptionProcessRealTime |
+		RubberBandOptionPitchHighConsistency |
+		RubberBandOptionPhaseIndependent |
+ 		RubberBandOptionTransientsSmooth |
+		RubberBandOptionWindowStandard;
+
+	hrm->left.pitcher = rubberband_new((unsigned int) rint(rate), 1, opt, 1.0, 1.0);
+	hrm->right.pitcher = rubberband_new((unsigned int) rint(rate), 1, opt, 1.0, 1.0);
+	rubberband_set_debug_level(hrm->left.pitcher, 1);
+
+	strcpy(hrm->left.name, "left");
+	strcpy(hrm->right.name, "right");
+
 	return (LV2_Handle)hrm;
 }
 
@@ -131,16 +136,16 @@ connect_port(LV2_Handle instance,
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 	switch ((PortIndex)port) {
 	case HRM_DELAY_L:
-		hrm->delay_L = (const float*)data;
+		hrm->left.delay = (const float*)data;
 		break;
 	case HRM_PITCH_L:
-		hrm->pitch_L = (const float*)data;
+		hrm->left.pitch = (const float*)data;
 		break;
 	case HRM_DELAY_R:
-		hrm->delay_R = (const float*)data;
+		hrm->right.delay = (const float*)data;
 		break;
 	case HRM_PITCH_R:
-		hrm->pitch_R = (const float*)data;
+		hrm->right.pitch = (const float*)data;
 		break;
 	case HRM_PANNER_WIDTH:
 		hrm->panner_width = (const float*)data;
@@ -155,10 +160,10 @@ connect_port(LV2_Handle instance,
 		hrm->input = (const float*)data;
 		break;
 	case HRM_OUTPUT_L:
-		hrm->output_L = (float*)data;
+		hrm->left.output = (float*)data;
 		break;
 	case HRM_OUTPUT_R:
-		hrm->output_R = (float*)data;
+		hrm->right.output = (float*)data;
 		break;
 	default:
 		assert(0);
@@ -172,88 +177,104 @@ activate(LV2_Handle instance)
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 	printf("Activate called\n");
 	reset_sample_buffer(hrm->retrieve_buffer);
-	reset_sample_buffer(hrm->delay_buffer_L);
-	reset_sample_buffer(hrm->pitch_buffer_L);
-	reset_sample_buffer(hrm->delay_buffer_R);
-	reset_sample_buffer(hrm->pitch_buffer_R);
+	reset_sample_buffer(hrm->left.delay_buffer);
+	reset_sample_buffer(hrm->left.pitch_buffer);
+	reset_sample_buffer(hrm->right.delay_buffer);
+	reset_sample_buffer(hrm->right.pitch_buffer);
 
-	hrm->pbuf_L_avail = 0;
-	hrm->pbuf_R_avail = 0;
+	hrm->left.avail = 0;
+	hrm->right.avail = 0;
 
-	hrm->buffer_pos_L = 0;
-	hrm->buffer_pos_R = 0;
+	hrm->left.buffer_pos = 0;
+	hrm->right.buffer_pos = 0;
 }
 
 static void
-pitch_shift(const float* const input, uint32_t n_samples, uint32_t* samples_available, RubberBandState pitcher, SampleBuffer* retr, SampleBuffer* out)
+pitch_shift(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
 {
 	uint32_t processed = 0;
 
-	const float* proc_ptr = input;
-	float* out_ptr = out->data;
+	const float* proc_ptr = hrm->copied_input->data;
+	float* out_ptr = ch->pitch_buffer->data;
 
 	while (processed < n_samples) {
-		uint32_t in_chunk_size = rubberband_get_samples_required(pitcher);
+		uint32_t in_chunk_size = rubberband_get_samples_required(ch->pitcher);
 		uint32_t samples_left = n_samples-processed;
 
 		if (samples_left < in_chunk_size) {
 			in_chunk_size = samples_left;
 		}
 
-		rubberband_process(pitcher, &proc_ptr, in_chunk_size, 0);
+		rubberband_process(ch->pitcher, &proc_ptr, in_chunk_size, 0);
 
 		processed += in_chunk_size;
 		proc_ptr += in_chunk_size;
 
-		uint32_t avail = rubberband_available(pitcher);
+		uint32_t avail = rubberband_available(ch->pitcher);
 
-		if (avail+*samples_available > n_samples) {
-			avail = n_samples - *samples_available;
+		if (avail+ch->avail > n_samples) {
+			avail = n_samples - ch->avail;
 		}
-		uint32_t out_chunk_size = rubberband_retrieve(pitcher, &(retr->data), avail);
+		uint32_t out_chunk_size = rubberband_retrieve(ch->pitcher, &(hrm->retrieve_buffer->data), avail);
 
-		//memcpy (out_ptr, retr, out_chunk_size * sizeof(float));
+		//memcpy (out_ptr, hrm->retrieve_buffer, out_chunk_size * sizeof(float));
 		for (unsigned int i=0; i<out_chunk_size; i++) {
-			out_ptr[i] = retr->data[i];
+			out_ptr[i] = hrm->retrieve_buffer->data[i];
 		}
 
 		out_ptr += out_chunk_size;
-		*samples_available += out_chunk_size;
+		ch->avail += out_chunk_size;
 	}
 }
 
-static uint32_t
-delay(const SampleBuffer* const in, uint32_t n_samples,
-      SampleBuffer* delay_buffer, uint32_t actual_n_samples,
-      float delay, uint32_t latency, uint32_t buf_pos,
-      const Harmonigilo* hrm, float* const out)
+static void
+delay(Harmonigilo* hrm, Channel *ch, uint32_t n_samples, uint32_t actual_n_samples, uint32_t latency)
 {
-	uint32_t buffer_pos = buf_pos;
 	const float rate = hrm->rate;
 
-	uint32_t delay_samples = (int) rint(delay*rate/1000.0) - latency;
+	const SampleBuffer* in = ch->pitch_buffer;
+	float* out = ch->output;
+
+	uint32_t delay_samples = (int) rint(*ch->delay*rate/1000.0) - latency;
 
 	if (delay_samples >= hrm->delay_buflen) {
 		delay_samples = hrm->delay_buflen - 1;
 	}
 
 	for (uint32_t pos = 0; pos < actual_n_samples; pos++) {
-		delay_buffer->data[buffer_pos] = in->data[pos];
+		ch->delay_buffer->data[ch->buffer_pos] = in->data[pos];
 
 		const uint32_t actual_pos = n_samples-actual_n_samples + pos;
-		if (delay_samples > buffer_pos) {
-			out[actual_pos] = delay_buffer->data[hrm->delay_buflen-(delay_samples-buffer_pos)];
+		if (delay_samples > ch->buffer_pos) {
+			out[actual_pos] = ch->delay_buffer->data[hrm->delay_buflen-(delay_samples-ch->buffer_pos)];
 		} else {
-			out[actual_pos] = delay_buffer->data[buffer_pos-delay_samples];
+			out[actual_pos] = ch->delay_buffer->data[ch->buffer_pos-delay_samples];
 		}
 
-		buffer_pos++;
-		if (buffer_pos == hrm->delay_buflen) {
-			buffer_pos = 0;
+		ch->buffer_pos++;
+		if (ch->buffer_pos == hrm->delay_buflen) {
+			ch->buffer_pos = 0;
 		}
 	}
+}
 
-	return buffer_pos;
+static void
+process_channel(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
+{
+	const float scale = pow(2.0, (*ch->pitch)/1200);
+
+	rubberband_set_pitch_scale(ch->pitcher, scale);
+
+	pitch_shift(hrm, ch, n_samples);
+
+	uint32_t actual_n_samples = ch->avail;
+	if (n_samples < actual_n_samples) {
+		actual_n_samples = n_samples;
+	}
+	if (actual_n_samples > 0) {
+		delay(hrm, ch, n_samples, actual_n_samples, 0);
+		ch->avail -= actual_n_samples;
+	}
 }
 
 static void
@@ -262,63 +283,18 @@ run(LV2_Handle instance, uint32_t n_samples)
 	assert (n_samples <= 8192);
 
 	Harmonigilo* hrm = (Harmonigilo*)instance;
+	memcpy (hrm->copied_input->data, hrm->input, n_samples*sizeof(float));
 
-	const float* const input  = hrm->input;
-
-	memcpy (hrm->copied_input->data, input, n_samples*sizeof(float));
-
-	float* const output_L = hrm->output_L;
-	float* const output_R = hrm->output_R;
-
-	const float scale_L = pow(2.0, (*hrm->pitch_L)/1200);
-	const float scale_R = pow(2.0, (*hrm->pitch_R)/1200);
-
-	int latency_L = rubberband_get_latency(hrm->pitcher_L);
-	int latency_R = rubberband_get_latency(hrm->pitcher_R);
-
-	if (latency_L > latency_R) {
-		*hrm->latency = latency_L;
-		latency_R -= latency_L;
-		latency_L = 0;
-	} else {
-		*hrm->latency = latency_R;
-		latency_L -= latency_R;
-		latency_R = 0;
-	}
+	process_channel(hrm, &hrm->left, n_samples);
+	process_channel(hrm, &hrm->right, n_samples);
 
 	const float dry_wet = *hrm->dry_wet;
 	const float panning = (1.0-*hrm->panner_width)/2.0;
-
-	rubberband_set_pitch_scale(hrm->pitcher_L, scale_L);
-	rubberband_set_pitch_scale(hrm->pitcher_R, scale_R);
-
-	pitch_shift(input, n_samples, &hrm->pbuf_L_avail, hrm->pitcher_L, hrm->retrieve_buffer, hrm->pitch_buffer_L);
-	pitch_shift(input, n_samples, &hrm->pbuf_R_avail, hrm->pitcher_R, hrm->retrieve_buffer, hrm->pitch_buffer_R);
-
-
-	uint32_t actual_n_samples = hrm->pbuf_L_avail;
-	if (n_samples < actual_n_samples) {
-		actual_n_samples = n_samples;
-	}
-	if (actual_n_samples > 0) {
-		hrm->buffer_pos_L = delay(hrm->pitch_buffer_L, n_samples, hrm->delay_buffer_L, actual_n_samples, *hrm->delay_L, latency_L, hrm->buffer_pos_L, hrm, output_L);
-		hrm->pbuf_L_avail -= actual_n_samples;
-	}
-
-	actual_n_samples = hrm->pbuf_R_avail;
-	if (n_samples < actual_n_samples) {
-		actual_n_samples = n_samples;
-	}
-	if (actual_n_samples > 0) {
-		hrm->buffer_pos_R = delay(hrm->pitch_buffer_R, n_samples, hrm->delay_buffer_R, actual_n_samples, *hrm->delay_R, latency_R, hrm->buffer_pos_R, hrm, output_R);
-		hrm->pbuf_R_avail -= actual_n_samples;
-	}
-
 	for (uint32_t i=0; i < n_samples; i++) {
-		const float l = output_L[i];
-		const float r = output_R[i];
-		output_L[i] = (l*panning + r*(1.0-panning))*dry_wet + hrm->copied_input->data[i]*(1.0-dry_wet);
-		output_R[i] = (r*panning + l*(1.0-panning))*dry_wet + hrm->copied_input->data[i]*(1.0-dry_wet);
+		const float l = hrm->left.output[i];
+		const float r = hrm->right.output[i];
+		hrm->left.output[i] = (l*panning + r*(1.0-panning))*dry_wet + hrm->copied_input->data[i]*(1.0-dry_wet);
+		hrm->right.output[i] = (r*panning + l*(1.0-panning))*dry_wet + hrm->copied_input->data[i]*(1.0-dry_wet);
 	}
 }
 
@@ -331,13 +307,13 @@ static void
 cleanup(LV2_Handle instance)
 {
 	Harmonigilo* hrm = (Harmonigilo*)instance;
-	rubberband_delete(hrm->pitcher_L);
-	rubberband_delete(hrm->pitcher_R);
+	rubberband_delete(hrm->left.pitcher);
+	rubberband_delete(hrm->right.pitcher);
 	delete_sample_buffer(hrm->retrieve_buffer);
-	delete_sample_buffer(hrm->pitch_buffer_L);
-	delete_sample_buffer(hrm->delay_buffer_L);
-	delete_sample_buffer(hrm->pitch_buffer_R);
-	delete_sample_buffer(hrm->delay_buffer_R);
+	delete_sample_buffer(hrm->left.pitch_buffer);
+	delete_sample_buffer(hrm->left.delay_buffer);
+	delete_sample_buffer(hrm->right.pitch_buffer);
+	delete_sample_buffer(hrm->right.delay_buffer);
 	free(instance);
 }
 
