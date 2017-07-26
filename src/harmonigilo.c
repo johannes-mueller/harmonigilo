@@ -74,6 +74,7 @@ typedef struct {
 	uint32_t avail;
 
 	SampleBuffer* delay_buffer;
+	uint32_t delay_samples;
 	uint32_t buffer_pos;
 } Channel;
 
@@ -228,27 +229,23 @@ pitch_shift(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
 }
 
 static void
-delay(Harmonigilo* hrm, Channel *ch, uint32_t n_samples, uint32_t actual_n_samples, uint32_t latency)
+delay(Harmonigilo* hrm, Channel *ch, uint32_t n_samples, uint32_t actual_n_samples)
 {
-	const float rate = hrm->rate;
-
 	const SampleBuffer* in = ch->pitch_buffer;
 	float* out = ch->output;
 
-	uint32_t delay_samples = (int) rint(*ch->delay*rate/1000.0) - latency;
-
-	if (delay_samples >= hrm->delay_buflen) {
-		delay_samples = hrm->delay_buflen - 1;
+	if (ch->delay_samples >= hrm->delay_buflen) {
+		ch->delay_samples = hrm->delay_buflen - 1;
 	}
 
 	for (uint32_t pos = 0; pos < actual_n_samples; pos++) {
 		ch->delay_buffer->data[ch->buffer_pos] = in->data[pos];
 
 		const uint32_t actual_pos = n_samples-actual_n_samples + pos;
-		if (delay_samples > ch->buffer_pos) {
-			out[actual_pos] = ch->delay_buffer->data[hrm->delay_buflen-(delay_samples-ch->buffer_pos)];
+		if (ch->delay_samples > ch->buffer_pos) {
+			out[actual_pos] = ch->delay_buffer->data[hrm->delay_buflen-(ch->delay_samples-ch->buffer_pos)];
 		} else {
-			out[actual_pos] = ch->delay_buffer->data[ch->buffer_pos-delay_samples];
+			out[actual_pos] = ch->delay_buffer->data[ch->buffer_pos-ch->delay_samples];
 		}
 
 		ch->buffer_pos++;
@@ -261,9 +258,6 @@ delay(Harmonigilo* hrm, Channel *ch, uint32_t n_samples, uint32_t actual_n_sampl
 static void
 process_channel(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
 {
-	const float scale = pow(2.0, (*ch->pitch)/1200);
-
-	rubberband_set_pitch_scale(ch->pitcher, scale);
 
 	pitch_shift(hrm, ch, n_samples);
 
@@ -272,9 +266,50 @@ process_channel(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
 		actual_n_samples = n_samples;
 	}
 	if (actual_n_samples > 0) {
-		delay(hrm, ch, n_samples, actual_n_samples, 0);
+		delay(hrm, ch, n_samples, actual_n_samples);
 		ch->avail -= actual_n_samples;
 	}
+}
+
+static void prepare_channels(Harmonigilo* hrm)
+{
+	rubberband_set_pitch_scale(hrm->left.pitcher, pow(2.0, (*hrm->left.pitch)/1200));
+	rubberband_set_pitch_scale(hrm->right.pitcher, pow(2.0, (*hrm->right.pitch)/1200));
+
+	uint32_t lat_L = rubberband_get_latency(hrm->left.pitcher);
+	uint32_t lat_R = rubberband_get_latency(hrm->right.pitcher);
+
+	uint32_t delay_L = (int) rint(*hrm->left.delay*hrm->rate/1000.0);
+	uint32_t delay_R = (int) rint(*hrm->right.delay*hrm->rate/1000.0);
+
+	if (lat_L > lat_R) {
+		lat_L -= lat_R;
+		lat_R = 0;
+	} else if (lat_R < lat_L) {
+		lat_R -= lat_L;
+		lat_L = 0;
+	}
+
+	if (lat_L > delay_L) {
+		lat_L -= delay_L;
+		delay_L = 0;
+	} else {
+		delay_L -= lat_L;
+		lat_L = 0;
+	}
+
+	if (lat_R > delay_R) {
+		lat_R -= delay_R;
+		delay_R = 0;
+	} else {
+		delay_R -= lat_R;
+		lat_R = 0;
+	}
+
+	hrm->left.delay_samples = delay_L;
+	hrm->right.delay_samples = delay_R;
+
+	*hrm->latency = lat_L > lat_R ? lat_L : lat_R;
 }
 
 static void
@@ -284,6 +319,8 @@ run(LV2_Handle instance, uint32_t n_samples)
 
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 	memcpy (hrm->copied_input->data, hrm->input, n_samples*sizeof(float));
+
+	prepare_channels(hrm);
 
 	process_channel(hrm, &hrm->left, n_samples);
 	process_channel(hrm, &hrm->right, n_samples);
