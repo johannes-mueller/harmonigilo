@@ -11,7 +11,7 @@ MANDIR ?= $(PREFIX)/share/man/man1
 LV2DIR ?= $(PREFIX)/lib/lv2
 
 OPTIMIZATIONS ?= -msse -msse2 -mfpmath=sse -ffast-math -fomit-frame-pointer -O3 -fno-finite-math-only -DNDEBUG
-CFLAGS ?= -Wall -Wno-unused-function
+CFLAGS ?= -g -Wall -Wno-unused-function
 STRIP  ?= strip
 
 EXTERNALUI?=no
@@ -253,7 +253,7 @@ $(BUILDDIR)$(LV2NAME)$(LIB_EXT): src/harmonigilo.c src/harmonigilo.h
 	$(CC) $(CPPFLAGS) $(LV2CFLAGS) -std=c99 \
 	  -o $(BUILDDIR)$(LV2NAME)$(LIB_EXT) src/harmonigilo.c \
 	  -shared $(LV2LDFLAGS) $(LDFLAGS) $(LOADLIBES)
-	$(STRIP) $(STRIPFLAGS) $(BUILDDIR)$(LV2NAME)$(LIB_EXT)
+#	$(STRIP) $(STRIPFLAGS) $(BUILDDIR)$(LV2NAME)$(LIB_EXT)
 
 JACKCFLAGS=-I. $(LV2CFLAGS) $(CFLAGS) $(LIC_CFLAGS)
 JACKCFLAGS+=`pkg-config --cflags jack lv2 pango pangocairo ltc $(PKG_GL_LIBS)`

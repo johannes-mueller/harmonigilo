@@ -29,15 +29,25 @@
 
 #include "harmonigilo.h"
 
+#define BUFLEN 8192
+
+#ifndef MIN
+#define MIN(A,B) ( (A) < (B) ? (A) : (B) )
+#endif
+#ifndef MAX
+#define MAX(A,B) ( (A) > (B) ? (A) : (B) )
+#endif
+
 typedef struct {
 	float* data;
 	size_t len;
+	size_t pos, last_pos;
 } SampleBuffer;
 
 static SampleBuffer*
 new_sample_buffer(size_t len)
 {
-	float* data = (float*)malloc(len*sizeof(float));
+	float* data = (float*)calloc(len, sizeof(float));
 	if (!data) {
 		return NULL;
 	}
@@ -47,6 +57,8 @@ new_sample_buffer(size_t len)
 	}
 	sb->data = data;
 	sb->len = len;
+	sb->pos = 0;
+	sb->last_pos = 0;
 	return sb;
 }
 
@@ -61,7 +73,80 @@ static void
 reset_sample_buffer(SampleBuffer* sb)
 {
 	bzero(sb->data, sb->len*sizeof(float));
+	sb->last_pos = 0;
+	sb->pos = 0;
 }
+
+static void
+put_to_sample_buffer(SampleBuffer* sb, const float* data, size_t len)
+{
+	assert (len <= sb->len);
+
+	sb->last_pos = sb->pos;
+	const size_t c = sb->len - sb->pos;
+	if (c >= len) {
+		memcpy (sb->data + sb->pos, data, len*sizeof(float));
+		sb->pos += len;
+		if (sb->pos == sb->len) {
+			sb->pos = 0;
+		}
+	} else {
+		memcpy (sb->data + sb->pos, data, c*sizeof(float));
+		memcpy (sb->data, data, (len-c)*sizeof(float));
+		sb->pos = len-c;
+	}
+}
+
+static uint32_t
+calc_sample_buffer_pos(const SampleBuffer* sb, int rel_pos)
+{
+	int pos = sb->last_pos + rel_pos;
+	if (pos < 0) {
+		return sb->len+pos;
+	}
+	if (pos >= (int)sb->len) {
+		return pos - sb->len;
+	}
+
+	return pos;
+}
+
+static void
+get_from_sample_buffer(const SampleBuffer* sb, int rel_pos, float* dst, size_t len)
+{
+	int pos = calc_sample_buffer_pos(sb, rel_pos);
+	if (pos+len > sb->len) {
+		const size_t c = sb->len-pos;
+		memcpy(dst, sb->data+pos, c*sizeof(float));
+		memcpy(dst+c, sb->data, (len-c)*sizeof(float));
+	} else {
+		memcpy(dst, sb->data+pos, len*sizeof(float));
+	}
+}
+
+static void
+copy_sample_buffer_chunk(SampleBuffer* dst, const SampleBuffer* src, int rel_pos, size_t len)
+{
+	int pos = calc_sample_buffer_pos(src, rel_pos);
+	if (pos+len > src->len) {
+		const size_t c = src->len-pos;
+		put_to_sample_buffer(dst, src->data+pos, c*sizeof(float));
+		put_to_sample_buffer(dst, src->data, (len-c)*sizeof(float));
+	} else {
+		put_to_sample_buffer(dst, src->data+pos, len*sizeof(float));
+	}
+}
+
+static float
+get_sample_from_sample_buffer(const SampleBuffer* sb, int rel_pos)
+{
+	int pos = calc_sample_buffer_pos(sb, rel_pos);
+	assert(pos>=0);
+	assert(pos<sb->len);
+	return sb->data[pos];
+}
+
+
 
 typedef struct {
 	char name[16];
@@ -76,6 +161,8 @@ typedef struct {
 	SampleBuffer* delay_buffer;
 	uint32_t delay_samples;
 	uint32_t buffer_pos;
+
+	uint32_t remaining_latency;
 } Channel;
 
 typedef struct {
@@ -84,8 +171,8 @@ typedef struct {
 	const float* dry_wet;
 	float* latency;
 
-	SampleBuffer* copied_input;
-	SampleBuffer* retrieve_buffer;
+	float* copied_input;
+	float* retrieve_buffer;
 
 	double rate;
 
@@ -102,10 +189,10 @@ instantiate(const LV2_Descriptor* descriptor,
 	    const LV2_Feature* const* features)
 {
 	Harmonigilo* hrm = (Harmonigilo*)malloc(sizeof(Harmonigilo));
-	hrm->copied_input = new_sample_buffer(8192);
-	hrm->retrieve_buffer = new_sample_buffer(8192);
-	hrm->left.pitch_buffer = new_sample_buffer(8192);
-	hrm->right.pitch_buffer = new_sample_buffer(8192);
+	hrm->copied_input = (float*)malloc(BUFLEN*sizeof(float));
+	hrm->retrieve_buffer = (float*)malloc(BUFLEN*sizeof(float));
+	hrm->left.pitch_buffer = new_sample_buffer(BUFLEN);
+	hrm->right.pitch_buffer = new_sample_buffer(BUFLEN);
 	const size_t delay_buflen = (size_t) rint (rate * MAXDELAY / 1000.0);
 	hrm->delay_buflen = delay_buflen;
 	hrm->left.delay_buffer = new_sample_buffer(delay_buflen);
@@ -177,7 +264,8 @@ activate(LV2_Handle instance)
 {
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 	printf("Activate called\n");
-	reset_sample_buffer(hrm->retrieve_buffer);
+	bzero(hrm->copied_input, BUFLEN*sizeof(float));
+	bzero(hrm->retrieve_buffer, BUFLEN*sizeof(float));
 	reset_sample_buffer(hrm->left.delay_buffer);
 	reset_sample_buffer(hrm->left.pitch_buffer);
 	reset_sample_buffer(hrm->right.delay_buffer);
@@ -195,7 +283,7 @@ pitch_shift(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
 {
 	uint32_t processed = 0;
 
-	const float* proc_ptr = hrm->copied_input->data;
+	const float* proc_ptr = hrm->copied_input;
 	float* out_ptr = ch->pitch_buffer->data;
 
 	while (processed < n_samples) {
@@ -216,12 +304,8 @@ pitch_shift(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
 		if (avail+ch->avail > n_samples) {
 			avail = n_samples - ch->avail;
 		}
-		uint32_t out_chunk_size = rubberband_retrieve(ch->pitcher, &(hrm->retrieve_buffer->data), avail);
-
-		//memcpy (out_ptr, hrm->retrieve_buffer, out_chunk_size * sizeof(float));
-		for (unsigned int i=0; i<out_chunk_size; i++) {
-			out_ptr[i] = hrm->retrieve_buffer->data[i];
-		}
+		uint32_t out_chunk_size = rubberband_retrieve(ch->pitcher, &(hrm->retrieve_buffer), avail);
+		memcpy (out_ptr, hrm->retrieve_buffer, out_chunk_size * sizeof(float));
 
 		out_ptr += out_chunk_size;
 		ch->avail += out_chunk_size;
@@ -282,14 +366,6 @@ static void prepare_channels(Harmonigilo* hrm)
 	uint32_t delay_L = (int) rint(*hrm->left.delay*hrm->rate/1000.0);
 	uint32_t delay_R = (int) rint(*hrm->right.delay*hrm->rate/1000.0);
 
-	if (lat_L > lat_R) {
-		lat_L -= lat_R;
-		lat_R = 0;
-	} else if (lat_R < lat_L) {
-		lat_R -= lat_L;
-		lat_L = 0;
-	}
-
 	if (lat_L > delay_L) {
 		lat_L -= delay_L;
 		delay_L = 0;
@@ -308,8 +384,9 @@ static void prepare_channels(Harmonigilo* hrm)
 
 	hrm->left.delay_samples = delay_L;
 	hrm->right.delay_samples = delay_R;
-
-	*hrm->latency = lat_L > lat_R ? lat_L : lat_R;
+	*hrm->latency = MAX(lat_L, lat_R);
+	hrm->left.remaining_latency = lat_L;
+	hrm->right.remaining_latency = lat_R;
 }
 
 static void
@@ -318,7 +395,7 @@ run(LV2_Handle instance, uint32_t n_samples)
 	assert (n_samples <= 8192);
 
 	Harmonigilo* hrm = (Harmonigilo*)instance;
-	memcpy (hrm->copied_input->data, hrm->input, n_samples*sizeof(float));
+	memcpy (hrm->copied_input, hrm->input, n_samples*sizeof(float));
 
 	prepare_channels(hrm);
 
@@ -327,12 +404,16 @@ run(LV2_Handle instance, uint32_t n_samples)
 
 	const float dry_wet = *hrm->dry_wet;
 	const float panning = (1.0-*hrm->panner_width)/2.0;
-	for (uint32_t i=0; i < n_samples; i++) {
+	const int lat = (int) *hrm->latency;
+	//	printf("Lat: %d\n", lat);
+	for (int i=0; i < n_samples; i++) {
 		const float l = hrm->left.output[i];
 		const float r = hrm->right.output[i];
-		hrm->left.output[i] = (l*panning + r*(1.0-panning))*dry_wet + hrm->copied_input->data[i]*(1.0-dry_wet);
-		hrm->right.output[i] = (r*panning + l*(1.0-panning))*dry_wet + hrm->copied_input->data[i]*(1.0-dry_wet);
+		const float in = hrm->copied_input[i];//get_sample_from_sample_buffer(hrm->copied_input, i-lat);
+		hrm->left.output[i] = (l*panning + r*(1.0-panning))*dry_wet + in*(1.0-dry_wet);
+		hrm->right.output[i] = (r*panning + l*(1.0-panning))*dry_wet + in*(1.0-dry_wet);
 	}
+
 }
 
 static void
@@ -346,7 +427,8 @@ cleanup(LV2_Handle instance)
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 	rubberband_delete(hrm->left.pitcher);
 	rubberband_delete(hrm->right.pitcher);
-	delete_sample_buffer(hrm->retrieve_buffer);
+	free (hrm->copied_input);
+	free (hrm->retrieve_buffer);
 	delete_sample_buffer(hrm->left.pitch_buffer);
 	delete_sample_buffer(hrm->left.delay_buffer);
 	delete_sample_buffer(hrm->right.pitch_buffer);
