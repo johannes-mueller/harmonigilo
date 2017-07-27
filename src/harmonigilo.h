@@ -30,9 +30,10 @@ typedef enum {
 	HRM_PANNER_WIDTH = 4,
 	HRM_DRYWET = 5,
 	HRM_LATENCY = 6,
-	HRM_INPUT = 7,
-	HRM_OUTPUT_L = 8,
-	HRM_OUTPUT_R = 9
+        HRM_ENABLED = 7,
+	HRM_INPUT = 8,
+	HRM_OUTPUT_L = 9,
+	HRM_OUTPUT_R = 10
 } PortIndex;
 
 

@@ -171,6 +171,8 @@ typedef struct {
 	const float* dry_wet;
 	float* latency;
 
+        const float* enabled;
+
 	float* copied_input;
 	float* retrieve_buffer;
 
@@ -247,6 +249,9 @@ connect_port(LV2_Handle instance,
 	case HRM_LATENCY:
 		hrm->latency = (float*)data;
 		break;
+        case HRM_ENABLED:
+                hrm->enabled = (float*)data;
+                break;
 	case HRM_INPUT:
 		hrm->input = (const float*)data;
 		break;
@@ -399,6 +404,17 @@ run(LV2_Handle instance, uint32_t n_samples)
 	assert (n_samples <= 8192);
 
 	Harmonigilo* hrm = (Harmonigilo*)instance;
+
+        if (*hrm->enabled <= 0) {
+                float in = 0.f;
+                for (uint32_t i=0; i<n_samples; ++i) {
+                        in = hrm->input[i] * 0.86070797642505780723; // -3db exp(-3.f/20.f*log(10.f))
+                        hrm->left.output[i] = in;
+                        hrm->right.output[i] = in;
+                }
+                return;
+        }
+
 	memcpy (hrm->copied_input, hrm->input, n_samples*sizeof(float));
 	put_to_sample_buffer(hrm->latency_buffer, hrm->input, n_samples);
 
