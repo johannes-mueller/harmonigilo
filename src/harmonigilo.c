@@ -174,6 +174,8 @@ typedef struct {
 	float* copied_input;
 	float* retrieve_buffer;
 
+	SampleBuffer* latency_buffer;
+
 	double rate;
 
 	size_t delay_buflen;
@@ -193,6 +195,7 @@ instantiate(const LV2_Descriptor* descriptor,
 	hrm->retrieve_buffer = (float*)malloc(BUFLEN*sizeof(float));
 	hrm->left.pitch_buffer = new_sample_buffer(BUFLEN);
 	hrm->right.pitch_buffer = new_sample_buffer(BUFLEN);
+	hrm->latency_buffer = new_sample_buffer(BUFLEN);
 	const size_t delay_buflen = (size_t) rint (rate * MAXDELAY / 1000.0);
 	hrm->delay_buflen = delay_buflen;
 	hrm->left.delay_buffer = new_sample_buffer(delay_buflen);
@@ -270,6 +273,7 @@ activate(LV2_Handle instance)
 	reset_sample_buffer(hrm->left.pitch_buffer);
 	reset_sample_buffer(hrm->right.delay_buffer);
 	reset_sample_buffer(hrm->right.pitch_buffer);
+	reset_sample_buffer(hrm->latency_buffer);
 
 	hrm->left.avail = 0;
 	hrm->right.avail = 0;
@@ -396,6 +400,7 @@ run(LV2_Handle instance, uint32_t n_samples)
 
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 	memcpy (hrm->copied_input, hrm->input, n_samples*sizeof(float));
+	put_to_sample_buffer(hrm->latency_buffer, hrm->input, n_samples);
 
 	prepare_channels(hrm);
 
@@ -405,11 +410,11 @@ run(LV2_Handle instance, uint32_t n_samples)
 	const float dry_wet = *hrm->dry_wet;
 	const float panning = (1.0-*hrm->panner_width)/2.0;
 	const int lat = (int) *hrm->latency;
-	//	printf("Lat: %d\n", lat);
+	//printf("Lat: %d\n", lat);
 	for (int i=0; i < n_samples; i++) {
 		const float l = hrm->left.output[i];
 		const float r = hrm->right.output[i];
-		const float in = hrm->copied_input[i];//get_sample_from_sample_buffer(hrm->copied_input, i-lat);
+		const float in = get_sample_from_sample_buffer(hrm->latency_buffer, i-lat);
 		hrm->left.output[i] = (l*panning + r*(1.0-panning))*dry_wet + in*(1.0-dry_wet);
 		hrm->right.output[i] = (r*panning + l*(1.0-panning))*dry_wet + in*(1.0-dry_wet);
 	}
@@ -433,6 +438,7 @@ cleanup(LV2_Handle instance)
 	delete_sample_buffer(hrm->left.delay_buffer);
 	delete_sample_buffer(hrm->right.pitch_buffer);
 	delete_sample_buffer(hrm->right.delay_buffer);
+	delete_sample_buffer(hrm->latency_buffer);
 	free(instance);
 }
 
