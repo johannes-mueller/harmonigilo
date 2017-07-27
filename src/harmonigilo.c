@@ -364,8 +364,8 @@ static void prepare_channels(Harmonigilo* hrm)
 	rubberband_set_pitch_scale(hrm->left.pitcher, pow(2.0, (*hrm->left.pitch)/1200));
 	rubberband_set_pitch_scale(hrm->right.pitcher, pow(2.0, (*hrm->right.pitch)/1200));
 
-	uint32_t lat_L = rubberband_get_latency(hrm->left.pitcher);
-	uint32_t lat_R = rubberband_get_latency(hrm->right.pitcher);
+	uint32_t lat_L = 2*rubberband_get_latency(hrm->left.pitcher);
+	uint32_t lat_R = 2*rubberband_get_latency(hrm->right.pitcher);
 
 	uint32_t delay_L = (int) rint(*hrm->left.delay*hrm->rate/1000.0);
 	uint32_t delay_R = (int) rint(*hrm->right.delay*hrm->rate/1000.0);
@@ -410,7 +410,6 @@ run(LV2_Handle instance, uint32_t n_samples)
 	const float dry_wet = *hrm->dry_wet;
 	const float panning = (1.0-*hrm->panner_width)/2.0;
 	const int lat = (int) *hrm->latency;
-	//printf("Lat: %d\n", lat);
 	for (int i=0; i < n_samples; i++) {
 		const float l = hrm->left.output[i];
 		const float r = hrm->right.output[i];
@@ -418,7 +417,6 @@ run(LV2_Handle instance, uint32_t n_samples)
 		hrm->left.output[i] = (l*panning + r*(1.0-panning))*dry_wet + in*(1.0-dry_wet);
 		hrm->right.output[i] = (r*panning + l*(1.0-panning))*dry_wet + in*(1.0-dry_wet);
 	}
-
 }
 
 static void
