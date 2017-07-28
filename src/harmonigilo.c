@@ -41,7 +41,7 @@
 typedef struct {
 	float* data;
 	size_t len;
-	size_t pos, last_pos;
+	size_t write_pos, read_pos;
 } SampleBuffer;
 
 static SampleBuffer*
@@ -57,8 +57,8 @@ new_sample_buffer(size_t len)
 	}
 	sb->data = data;
 	sb->len = len;
-	sb->pos = 0;
-	sb->last_pos = 0;
+	sb->write_pos = 0;
+	sb->read_pos = 0;
 	return sb;
 }
 
@@ -73,8 +73,8 @@ static void
 reset_sample_buffer(SampleBuffer* sb)
 {
 	bzero(sb->data, sb->len*sizeof(float));
-	sb->last_pos = 0;
-	sb->pos = 0;
+	sb->read_pos = 0;
+	sb->write_pos = 0;
 }
 
 static void
@@ -82,25 +82,24 @@ put_to_sample_buffer(SampleBuffer* sb, const float* data, size_t len)
 {
 	assert (len <= sb->len);
 
-	sb->last_pos = sb->pos;
-	const size_t c = sb->len - sb->pos;
+	const size_t c = sb->len - sb->write_pos;
 	if (c >= len) {
-		memcpy (sb->data + sb->pos, data, len*sizeof(float));
-		sb->pos += len;
-		if (sb->pos == sb->len) {
-			sb->pos = 0;
+		memcpy (sb->data + sb->write_pos, data, len*sizeof(float));
+		sb->write_pos += len;
+		if (sb->write_pos == sb->len) {
+			sb->write_pos = 0;
 		}
 	} else {
-		memcpy (sb->data + sb->pos, data, c*sizeof(float));
-		memcpy (sb->data, data, (len-c)*sizeof(float));
-		sb->pos = len-c;
+		memcpy (sb->data + sb->write_pos, data, c*sizeof(float));
+		memcpy (sb->data, data+c, (len-c)*sizeof(float));
+		sb->write_pos = len-c;
 	}
 }
 
 static uint32_t
 calc_sample_buffer_pos(const SampleBuffer* sb, int rel_pos)
 {
-	int pos = sb->last_pos + rel_pos;
+	int pos = sb->read_pos + rel_pos;
 	if (pos < 0) {
 		return sb->len+pos;
 	}
@@ -112,37 +111,46 @@ calc_sample_buffer_pos(const SampleBuffer* sb, int rel_pos)
 }
 
 static void
-get_from_sample_buffer(const SampleBuffer* sb, int rel_pos, float* dst, size_t len)
+sample_buffer_advance_read_pos(SampleBuffer* sb, size_t inc)
 {
-	int pos = calc_sample_buffer_pos(sb, rel_pos);
-	if (pos+len > sb->len) {
-		const size_t c = sb->len-pos;
-		memcpy(dst, sb->data+pos, c*sizeof(float));
-		memcpy(dst+c, sb->data, (len-c)*sizeof(float));
-	} else {
-		memcpy(dst, sb->data+pos, len*sizeof(float));
+	sb->read_pos += inc;
+	if (sb->read_pos >= sb->len) {
+		sb->read_pos -= sb->len;
 	}
 }
 
 static void
-copy_sample_buffer_chunk(SampleBuffer* dst, const SampleBuffer* src, int rel_pos, size_t len)
+get_from_sample_buffer(SampleBuffer* sb, int rel_pos, float* dst, size_t len)
 {
-	int pos = calc_sample_buffer_pos(src, rel_pos);
-	if (pos+len > src->len) {
-		const size_t c = src->len-pos;
-		put_to_sample_buffer(dst, src->data+pos, c*sizeof(float));
-		put_to_sample_buffer(dst, src->data, (len-c)*sizeof(float));
+	if (sb->write_pos == sb->read_pos) {
+		memset(dst, 0, len*sizeof(float));
+		return;
+	}
+	uint32_t pos = calc_sample_buffer_pos(sb, rel_pos);
+	if (pos < sb->write_pos && pos > sb->write_pos-len) {
+		const uint32_t d = len-(sb->write_pos-pos);
+		memcpy(dst+d, sb->data+pos, (len-d)*sizeof(float));
+		sample_buffer_advance_read_pos(sb, len-d);
+		return;
+	}
+	if (pos+len > sb->len) {
+		const size_t c = sb->len-pos;
+                memcpy(dst, sb->data+pos, c*sizeof(float));
+                memcpy(dst+c, sb->data, (len-c)*sizeof(float));
+		sb->read_pos = (len-c-rel_pos);
 	} else {
-		put_to_sample_buffer(dst, src->data+pos, len*sizeof(float));
+		memcpy(dst, sb->data+pos, len*sizeof(float));
+		sample_buffer_advance_read_pos(sb, len);
 	}
 }
 
 static float
-get_sample_from_sample_buffer(const SampleBuffer* sb, int rel_pos)
+get_sample_from_sample_buffer(SampleBuffer* sb, int rel_pos)
 {
-	int pos = calc_sample_buffer_pos(sb, rel_pos);
+	uint32_t pos = calc_sample_buffer_pos(sb, rel_pos);
 	assert(pos>=0);
 	assert(pos<sb->len);
+        sample_buffer_advance_read_pos(sb, 1);
 	return sb->data[pos];
 }
 
@@ -156,11 +164,8 @@ typedef struct {
 
 	RubberBandState pitcher;
 	SampleBuffer* pitch_buffer;
-	uint32_t avail;
 
-	SampleBuffer* delay_buffer;
 	uint32_t delay_samples;
-	uint32_t buffer_pos;
 
 	uint32_t remaining_latency;
 } Channel;
@@ -180,8 +185,6 @@ typedef struct {
 
 	double rate;
 
-	size_t delay_buflen;
-
 	Channel left, right;
 } Harmonigilo;
 
@@ -195,13 +198,10 @@ instantiate(const LV2_Descriptor* descriptor,
 	Harmonigilo* hrm = (Harmonigilo*)malloc(sizeof(Harmonigilo));
 	hrm->copied_input = (float*)malloc(BUFLEN*sizeof(float));
 	hrm->retrieve_buffer = (float*)malloc(BUFLEN*sizeof(float));
-	hrm->left.pitch_buffer = new_sample_buffer(BUFLEN);
+	const size_t delay_buflen = (size_t) rint (rate * MAXDELAY / 1000.0);
+	hrm->left.pitch_buffer = new_sample_buffer(delay_buflen);
 	hrm->right.pitch_buffer = new_sample_buffer(BUFLEN);
 	hrm->latency_buffer = new_sample_buffer(BUFLEN);
-	const size_t delay_buflen = (size_t) rint (rate * MAXDELAY / 1000.0);
-	hrm->delay_buflen = delay_buflen;
-	hrm->left.delay_buffer = new_sample_buffer(delay_buflen);
-	hrm->right.delay_buffer = new_sample_buffer(delay_buflen);
 	hrm->rate = rate;
 
 	enum RubberBandOption opt =
@@ -274,17 +274,9 @@ activate(LV2_Handle instance)
 	printf("Activate called\n");
 	bzero(hrm->copied_input, BUFLEN*sizeof(float));
 	bzero(hrm->retrieve_buffer, BUFLEN*sizeof(float));
-	reset_sample_buffer(hrm->left.delay_buffer);
 	reset_sample_buffer(hrm->left.pitch_buffer);
-	reset_sample_buffer(hrm->right.delay_buffer);
 	reset_sample_buffer(hrm->right.pitch_buffer);
 	reset_sample_buffer(hrm->latency_buffer);
-
-	hrm->left.avail = 0;
-	hrm->right.avail = 0;
-
-	hrm->left.buffer_pos = 0;
-	hrm->right.buffer_pos = 0;
 }
 
 static void
@@ -293,7 +285,6 @@ pitch_shift(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
 	uint32_t processed = 0;
 
 	const float* proc_ptr = hrm->copied_input;
-	float* out_ptr = ch->pitch_buffer->data;
 
 	while (processed < n_samples) {
 		uint32_t in_chunk_size = rubberband_get_samples_required(ch->pitcher);
@@ -308,60 +299,17 @@ pitch_shift(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
 		processed += in_chunk_size;
 		proc_ptr += in_chunk_size;
 
-		uint32_t avail = rubberband_available(ch->pitcher);
-
-		if (avail+ch->avail > n_samples) {
-			avail = n_samples - ch->avail;
-		}
+		const uint32_t avail = rubberband_available(ch->pitcher);
 		uint32_t out_chunk_size = rubberband_retrieve(ch->pitcher, &(hrm->retrieve_buffer), avail);
-		memcpy (out_ptr, hrm->retrieve_buffer, out_chunk_size * sizeof(float));
-
-		out_ptr += out_chunk_size;
-		ch->avail += out_chunk_size;
-	}
-}
-
-static void
-delay(Harmonigilo* hrm, Channel *ch, uint32_t n_samples, uint32_t actual_n_samples)
-{
-	const SampleBuffer* in = ch->pitch_buffer;
-	float* out = ch->output;
-
-	if (ch->delay_samples >= hrm->delay_buflen) {
-		ch->delay_samples = hrm->delay_buflen - 1;
-	}
-
-	for (uint32_t pos = 0; pos < actual_n_samples; pos++) {
-		ch->delay_buffer->data[ch->buffer_pos] = in->data[pos];
-
-		const uint32_t actual_pos = n_samples-actual_n_samples + pos;
-		if (ch->delay_samples > ch->buffer_pos) {
-			out[actual_pos] = ch->delay_buffer->data[hrm->delay_buflen-(ch->delay_samples-ch->buffer_pos)];
-		} else {
-			out[actual_pos] = ch->delay_buffer->data[ch->buffer_pos-ch->delay_samples];
-		}
-
-		ch->buffer_pos++;
-		if (ch->buffer_pos == hrm->delay_buflen) {
-			ch->buffer_pos = 0;
-		}
+		put_to_sample_buffer(ch->pitch_buffer, hrm->retrieve_buffer, out_chunk_size);
 	}
 }
 
 static void
 process_channel(Harmonigilo* hrm, Channel* ch, uint32_t n_samples)
 {
-
 	pitch_shift(hrm, ch, n_samples);
-
-	uint32_t actual_n_samples = ch->avail;
-	if (n_samples < actual_n_samples) {
-		actual_n_samples = n_samples;
-	}
-	if (actual_n_samples > 0) {
-		delay(hrm, ch, n_samples, actual_n_samples);
-		ch->avail -= actual_n_samples;
-	}
+        get_from_sample_buffer(ch->pitch_buffer, -(ch->delay_samples), ch->output, n_samples);
 }
 
 static void prepare_channels(Harmonigilo* hrm)
@@ -416,7 +364,7 @@ run(LV2_Handle instance, uint32_t n_samples)
         }
 
 	memcpy (hrm->copied_input, hrm->input, n_samples*sizeof(float));
-	put_to_sample_buffer(hrm->latency_buffer, hrm->input, n_samples);
+	put_to_sample_buffer(hrm->latency_buffer, hrm->copied_input, n_samples);
 
 	prepare_channels(hrm);
 
@@ -429,7 +377,7 @@ run(LV2_Handle instance, uint32_t n_samples)
 	for (int i=0; i < n_samples; i++) {
 		const float l = hrm->left.output[i];
 		const float r = hrm->right.output[i];
-		const float in = get_sample_from_sample_buffer(hrm->latency_buffer, i-lat);
+		const float in = get_sample_from_sample_buffer(hrm->latency_buffer, -lat);
 		hrm->left.output[i] = (l*panning + r*(1.0-panning))*dry_wet + in*(1.0-dry_wet);
 		hrm->right.output[i] = (r*panning + l*(1.0-panning))*dry_wet + in*(1.0-dry_wet);
 	}
@@ -449,9 +397,7 @@ cleanup(LV2_Handle instance)
 	free (hrm->copied_input);
 	free (hrm->retrieve_buffer);
 	delete_sample_buffer(hrm->left.pitch_buffer);
-	delete_sample_buffer(hrm->left.delay_buffer);
 	delete_sample_buffer(hrm->right.pitch_buffer);
-	delete_sample_buffer(hrm->right.delay_buffer);
 	delete_sample_buffer(hrm->latency_buffer);
 	free(instance);
 }
