@@ -25,39 +25,23 @@
 #define MAXDELAY 1000.0
 
 typedef enum {
- 	HRM_DELAY_1 = 0,
-	HRM_PITCH_1 = 1,
-        HRM_PAN_1 = 2,
-        HRM_GAIN_1 = 3,
- 	HRM_DELAY_2 = 4,
-	HRM_PITCH_2 = 5,
-        HRM_PAN_2 = 6,
-        HRM_GAIN_2 = 7,
- 	HRM_DELAY_3 = 8,
-	HRM_PITCH_3 = 9,
-        HRM_PAN_3 = 10,
-        HRM_GAIN_3 = 11,
- 	HRM_DELAY_4 = 12,
-	HRM_PITCH_4 = 13,
-        HRM_PAN_4 = 14,
-        HRM_GAIN_4 = 15,
- 	HRM_DELAY_5 = 16,
-	HRM_PITCH_5 = 17,
-        HRM_PAN_5 = 18,
-        HRM_GAIN_5 = 19,
- 	HRM_DELAY_6 = 20,
-	HRM_PITCH_6 = 21,
-        HRM_PAN_6 = 22,
-        HRM_GAIN_6 = 23,
+ 	HRM_DELAY_0 = 0,
+	HRM_PITCH_0 = 1,
+	HRM_PAN_0 = 2,
+	HRM_GAIN_0 = 3,
+	HRM_MUTE_0 = 4,
+	HRM_SOLO_0 = 5,
 
-        HRM_DRY_PAN = 24,
-	HRM_DRY_GAIN = 25,
+	HRM_DRY_PAN = 36,
+	HRM_DRY_GAIN = 37,
+	HRM_DRY_MUTE = 38,
+	HRM_DRY_SOLO = 39,
 
-	HRM_LATENCY = 26,
-        HRM_ENABLED = 27,
-	HRM_INPUT = 28,
-	HRM_OUTPUT_L = 29,
-	HRM_OUTPUT_R = 30
+	HRM_LATENCY = 40,
+	HRM_ENABLED = 41,
+	HRM_INPUT = 42,
+	HRM_OUTPUT_L = 43,
+	HRM_OUTPUT_R = 44
 } PortIndex;
 
 

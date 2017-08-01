@@ -18,6 +18,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <strings.h>
 #include <string.h>
 
@@ -364,6 +365,11 @@ run(LV2_Handle instance, uint32_t n_samples)
 	uint32_t min_delay = MAXDELAY*hrm->rate/1000.0;
 	uint32_t max_latency = 0;
 
+	bool solo = false;
+	if (*hrm->dry_solo > 0.5) {
+		solo = true;
+	}
+
 	for (Channel* ch = hrm->channel; ch < hrm->channel+CHAN_NUM; ++ch) {
 		rubberband_set_pitch_scale(ch->pitcher, pow(2.0, (*ch->pitch)/1200));
 
@@ -376,6 +382,10 @@ run(LV2_Handle instance, uint32_t n_samples)
 
 		if (ch->latency > max_latency) {
 			max_latency = ch-> latency;
+		}
+
+		if (*ch->solo > 0.5) {
+			solo = true;
 		}
 	}
 
@@ -396,7 +406,10 @@ run(LV2_Handle instance, uint32_t n_samples)
 		get_from_sample_buffer(ch->pitch_buffer, -(ch->delay_samples), ch->delay_buffer, n_samples);
 	}
 
-	const float dry_gain = from_dB(*hrm->dry_gain);
+	float dry_gain = from_dB(*hrm->dry_gain);
+	if ((*hrm->dry_mute>0.5) || (solo && (*hrm->dry_solo<=0.5))) {
+			dry_gain = 0.f;
+	}
 	const float dry_pan = *hrm->dry_pan;
 	for (uint32_t i=0; i<n_samples; ++i) {
 		const float in = dry_gain*get_sample_from_sample_buffer(hrm->latency_buffer, -(*hrm->latency));
@@ -407,7 +420,10 @@ run(LV2_Handle instance, uint32_t n_samples)
 
 	for (Channel* ch = hrm->channel; ch < hrm->channel+CHAN_NUM; ++ch) {
 		const float pan = *ch->pan;
-		const float gain = from_dB(*ch->gain);
+		float gain = from_dB(*ch->gain);
+		if ((*ch->mute>0.5) || (solo && (*ch->solo<=0.5))) {
+			gain = 0.f;
+		}
 		for (uint32_t i=0; i<n_samples; ++i) {
 			const float p = gain*ch->delay_buffer[i];
 			hrm->output_L[i] += p*(1.f-pan);
