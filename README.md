@@ -8,14 +8,14 @@ Work in progress / don't use yet, just look and test
 *Harmonigilo* is a LV2 plugin designed to enhance solo vocal audio tracks by
 making them sound more voluminous. This is achieved by the following measures:
 
-* The signal is split up into two parallel signals
+* The signal is split up into six parallel signals called voices
 
-* These parallel signals are slightly (a couple of cents) pitch shifted up
+* These voices are slightly (a couple of cents) pitch shifted up
   and/or down
 
-* Then the parallel signals are slightly (some 15 milliseconds) delayed
+* Then the voices are slightly (some 15 milliseconds) delayed
 
-* Finally the parallel signals are panned two the stereo panorama
+* Finally the voices are panned two the stereo panorama
 
 * The final stereo signal is blended with the input signal
 
@@ -23,27 +23,35 @@ making them sound more voluminous. This is achieved by the following measures:
 
 
 ## Usage
-So far there's only the generic UI. There are the following controls
+There are the following controls
 
-* Pitch L / Pitch R (the two pitch shifts)
+* Pitch 1-6 (the pitch shifts)
 
-* Delay L / Delay R (the two delays)
+* Delay 1-6 (the delays)
 
-* Panner width (the stereo width 0 = no stereo; 1 = left/right strictly
-  seperated)
+* Pan 1-6 (the panning of the voices)
 
-* Dry/Wet (the blend with the original signal 0 = totally dry, 1 = only wet)
+* Gain 1-6 (the levels of the voices)
 
+* Dry Pan (the panning of the dry signal)
+
+* Dry Gain (the gain of the dry signal)
+
+Moreover each voice as well as the dry signal has a mute and solo button.
 
 ## Todo
 
 * Test'n'Debug
 
+* Make the GUI look nicer
+
 * Make it run on Windows and Mac (I probably won't do it, so PRs welcome)
 
 * Switch to *wafscript*. Or stay with *make*? Don't know.
 
+* Write more docs
+
 
 ## What does the name mean?
 
-It's Esperanto. You can probably guess what it means.
+It's Esperanto. You can probably guess what it means. Maybe it should be named "korusigilo".
