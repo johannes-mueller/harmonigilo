@@ -166,6 +166,8 @@ typedef struct {
 	const float* pitch;
 	const float* pan;
 	const float* gain;
+	const float* mute;
+	const float* solo;
 
 	float* delay_buffer;
 
@@ -184,6 +186,8 @@ typedef struct {
 
 	const float* dry_pan;
 	const float* dry_gain;
+	const float* dry_mute;
+	const float* dry_solo;
 
 	float* latency;
 
@@ -237,25 +241,26 @@ connect_port(LV2_Handle instance,
 {
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 
-	if (port < 27)
-		printf("port %d %d %d\n", port, port/4, port%4);
-
-	if (port < CHAN_NUM*4) {
-
-
-		Channel* ch = &hrm->channel[port/4];
-		switch (port % 4) {
-		case 0:
+	if (port < CHAN_NUM*6) {
+		Channel* ch = &hrm->channel[port/6];
+		switch (port % 6) {
+		case HRM_DELAY_0:
 			ch->delay = (const float*)data;
 			break;
-		case 1:
+		case HRM_PITCH_0:
 			ch->pitch = (const float*)data;
 			break;
-		case 2:
+		case HRM_PAN_0:
 			ch->pan = (const float*)data;
 			break;
-		case 3:
+		case HRM_GAIN_0:
 			ch->gain = (const float*)data;
+			break;
+		case HRM_MUTE_0:
+			ch->mute = (const float*)data;
+			break;
+		case HRM_SOLO_0:
+			ch->solo = (const float*)data;
 			break;
 		default:
 			break;
@@ -269,6 +274,12 @@ connect_port(LV2_Handle instance,
 		break;
 	case HRM_DRY_GAIN:
 		hrm->dry_gain = (const float*)data;
+		break;
+	case HRM_DRY_MUTE:
+		hrm->dry_mute = (const float*)data;
+		break;
+	case HRM_DRY_SOLO:
+		hrm->dry_solo = (const float*)data;
 		break;
 	case HRM_LATENCY:
 		hrm->latency = (float*)data;
@@ -381,6 +392,7 @@ run(LV2_Handle instance, uint32_t n_samples)
 		ch->delay_samples -= latency_correction;
 
 		pitch_shift(hrm, ch, n_samples);
+//		printf("Delay: %f, %d\n", *ch->delay, ch->delay_samples);
 		get_from_sample_buffer(ch->pitch_buffer, -(ch->delay_samples), ch->delay_buffer, n_samples);
 	}
 
