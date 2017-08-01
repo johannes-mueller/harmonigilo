@@ -25,7 +25,7 @@
 #define ROUTE_WIDTH  80.0
 #define STEP_HEIGHT 40.0
 #define DIAL_RADIUS 10.0
-#define DIAL_CX 40.0
+#define DIAL_CX ROUTE_WIDTH/2
 #define DIAL_CY 15.0
 #define ARROW_LENGTH 7.5
 
@@ -39,40 +39,43 @@ typedef struct {
 	RobWidget* hbox;
 	RobWidget* ctable;
 
-	RobTkLbl* lbl_left;
-	RobTkLbl* lbl_right;
+	RobTkLbl* lbl_chan[CHAN_NUM];
+	RobTkLbl* lbl_dry;
 
-	RobTkDial* pitch_L;
-	RobTkDial* pitch_R;
+	RobTkDial* pitch[CHAN_NUM];
+	RobTkDial* delay[CHAN_NUM];
+	RobTkDial* pan[CHAN_NUM];
+	RobTkDial* gain[CHAN_NUM];
+	RobWidget* sm_box[CHAN_NUM];
+	RobTkCBtn* mute[CHAN_NUM];
+	RobTkCBtn* solo[CHAN_NUM];
 
-	RobTkLbl* lbl_pitch_L;
-	RobTkLbl* lbl_pitch_R;
+	RobTkDial* dry_gain;
+	RobTkDial* dry_pan;
+	RobWidget* dry_sm_box;
+	RobTkCBtn* dry_mute;
+	RobTkCBtn* dry_solo;
 
-	RobTkDial* delay_L;
-	RobTkDial* delay_R;
+	RobTkLbl* lbl_pitch;
+	RobTkLbl* lbl_delay;
+	RobTkLbl* lbl_pan;
+	RobTkLbl* lbl_gain;
 
-	RobTkLbl* lbl_delay_L;
-	RobTkLbl* lbl_delay_R;
-
-	RobTkDial* panner_width;
-	RobTkLbl* lbl_panner_width;
-
-	RobTkDial* dry_wet;
-	RobTkLbl* lbl_dry_wet;
 
 	RobTkDarea* left_darea;
 	RobTkDarea* right_darea;
 
-	cairo_surface_t* bg_pitch_L;
-	cairo_surface_t* bg_pitch_R;
-	cairo_surface_t* bg_delay_L;
-	cairo_surface_t* bg_delay_R;
-	cairo_surface_t* bg_panner_width;
-	cairo_surface_t* bg_dry_wet;
+	cairo_surface_t* bg_pitch[CHAN_NUM];
+	cairo_surface_t* bg_delay[CHAN_NUM];
+	cairo_surface_t* bg_pan[CHAN_NUM];
+	cairo_surface_t* bg_gain[CHAN_NUM];
 
 	PangoFontDescription* annotation_font;
 
+	bool disable_signals;
+
 } HarmonigiloUI;
+
 
 static bool box_expose_event(RobWidget *rw, cairo_t* cr, cairo_rectangle_t* ev)
 {
@@ -125,11 +128,11 @@ dial_annotation_ms(RobTkDial* d, cairo_t* cr, void *data)
 }
 
 static void
-dial_annotation_wet(RobTkDial* d, cairo_t* cr, void *data)
+dial_annotation_db(RobTkDial* d, cairo_t* cr, void *data)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) data;
 	char buf[16];
-	snprintf(buf, 16, "%3.0f %% wet", d->cur*100.0);
+	snprintf(buf, 16, "%3.1f db", d->cur);
 	annotation_txt(ui, d, cr, buf);
 }
 
@@ -196,6 +199,7 @@ static void panner_width_faceplate(cairo_surface_t* s)
 
 static void create_faceplate(HarmonigiloUI* ui)
 {
+	/*
 	ui->bg_pitch_L = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
 	pitch_faceplate(ui->bg_pitch_L);
 
@@ -213,7 +217,7 @@ static void create_faceplate(HarmonigiloUI* ui)
 
 	ui->bg_dry_wet = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
 	panner_width_faceplate(ui->bg_dry_wet);
-
+	*/
 	/*
 	CairoSetSouerceRGBA(c_g60);
 	cairo_move_to(cr, ROUTE_WIDTH, STEP_HEIGHT);
@@ -245,6 +249,7 @@ static void create_faceplate(HarmonigiloUI* ui)
 static void
 draw_route_left(cairo_t* cr, void *handle)
 {
+	/*
 	HarmonigiloUI* ui = (HarmonigiloUI*) handle;
 
 	const float val = robtk_dial_get_value(ui->panner_width);
@@ -274,11 +279,13 @@ draw_route_left(cairo_t* cr, void *handle)
 		cairo_line_to(cr, ROUTE_WIDTH, DIAL_CY);
 		cairo_stroke(cr);
 	}
+	*/
 }
 
 static void
 draw_route_right(cairo_t* cr, void *handle)
 {
+	/*
 	HarmonigiloUI* ui = (HarmonigiloUI*) handle;
 
 	const float val = robtk_dial_get_value(ui->panner_width);
@@ -308,11 +315,13 @@ draw_route_right(cairo_t* cr, void *handle)
 		cairo_line_to(cr, 0, DIAL_CY);
 		cairo_stroke(cr);
 	}
+	*/
 }
 
 static void
 draw_route_middle(HarmonigiloUI* ui)
 {
+	/*
 	const float val = robtk_dial_get_value(ui->panner_width);
 
 	const float xr1 = ROUTE_WIDTH/2.0 * (1.0-2.0*val);
@@ -363,57 +372,133 @@ draw_route_middle(HarmonigiloUI* ui)
 	cairo_stroke(cr);
 
 	cairo_destroy(cr);
+	*/
 }
 
-static bool cb_set_pitch_L(RobWidget* handle, void* data)
+static bool cb_set_pitch(RobWidget* handle, void* data)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) data;
-	const float val = robtk_dial_get_value(ui->pitch_L);
-	ui->write(ui->controller, HRM_PITCH_L, sizeof(float), 0, (const void*) &val);
+	if (ui->disable_signals) {
+		return true;
+	}
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		const float val = robtk_dial_get_value(ui->pitch[i]);
+		ui->write(ui->controller, HRM_PITCH_0+(6*i), sizeof(float), 0, (const void*) &val);
+	}
 	return true;
 }
 
-static bool cb_set_pitch_R(RobWidget* handle, void* data)
+static bool cb_set_delay(RobWidget* handle, void* data)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) data;
-	const float val = robtk_dial_get_value(ui->pitch_R);
-	ui->write(ui->controller, HRM_PITCH_R, sizeof(float), 0, (const void*) &val);
+	if (ui->disable_signals) {
+		return true;
+	}
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		const float val = robtk_dial_get_value(ui->delay[i]);
+		ui->write(ui->controller, HRM_DELAY_0+(6*i), sizeof(float), 0, (const void*) &val);
+	}
 	return true;
 }
 
-static bool cb_set_delay_L(RobWidget* handle, void* data)
+static bool cb_set_pan(RobWidget* handle, void* data)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) data;
-	const float val = robtk_dial_get_value(ui->delay_L);
-	ui->write(ui->controller, HRM_DELAY_L, sizeof(float), 0, (const void*) &val);
+	if (ui->disable_signals) {
+		return true;
+	}
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		const float val = robtk_dial_get_value(ui->pan[i]);
+		ui->write(ui->controller, HRM_PAN_0+(6*i), sizeof(float), 0, (const void*) &val);
+	}
 	return true;
 }
 
-static bool cb_set_delay_R(RobWidget* handle, void* data)
+static bool cb_set_gain(RobWidget* handle, void* data)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) data;
-	const float val = robtk_dial_get_value(ui->delay_R);
-	ui->write(ui->controller, HRM_DELAY_R, sizeof(float), 0, (const void*) &val);
+	if (ui->disable_signals) {
+		return true;
+	}
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		const float val = robtk_dial_get_value(ui->gain[i]);
+		ui->write(ui->controller, HRM_GAIN_0+(6*i), sizeof(float), 0, (const void*) &val);
+	}
 	return true;
 }
 
-static bool cb_set_dry_wet(RobWidget* handle, void* data)
+static bool cb_set_mute(RobWidget* handle, void* data)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) data;
-	const float val = robtk_dial_get_value(ui->dry_wet);
-	ui->write(ui->controller, HRM_DRYWET, sizeof(float), 0, (const void*) &val);
+	if (ui->disable_signals) {
+		return true;
+	}
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		const float val = robtk_cbtn_get_active(ui->mute[i]) ? 1.f : 0.f;
+		ui->write(ui->controller, HRM_MUTE_0+(6*i), sizeof(float), 0, (const void*) &val);
+	}
 	return true;
 }
 
-static bool cb_set_panner_width(RobWidget* handle, void* data)
+static bool cb_set_solo(RobWidget* handle, void* data)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) data;
-	const float val = robtk_dial_get_value(ui->panner_width);
-	ui->write(ui->controller, HRM_PANNER_WIDTH, sizeof(float), 0, (const void*) &val);
+	if (ui->disable_signals) {
+		return true;
+	}
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		const float val = robtk_cbtn_get_active(ui->solo[i]) ? 1.f : 0.f;
+		ui->write(ui->controller, HRM_SOLO_0+(6*i), sizeof(float), 0, (const void*) &val);
+	}
+	return true;
+}
+static bool cb_set_dry_pan(RobWidget* handle, void* data)
+{
+	HarmonigiloUI* ui = (HarmonigiloUI*) data;
+	if (ui->disable_signals) {
+		return true;
+	}
+	const float val = robtk_dial_get_value(ui->dry_pan);
+	ui->write(ui->controller, HRM_DRY_PAN, sizeof(float), 0, (const void*) &val);
 
-	robtk_darea_redraw(ui->left_darea);
-	robtk_darea_redraw(ui->right_darea);
-	draw_route_middle(ui);
+	return true;
+}
+
+static bool cb_set_dry_gain(RobWidget* handle, void* data)
+{
+	HarmonigiloUI* ui = (HarmonigiloUI*) data;
+	if (ui->disable_signals) {
+		return true;
+	}
+	const float val = robtk_dial_get_value(ui->dry_gain);
+	ui->write(ui->controller, HRM_DRY_GAIN, sizeof(float), 0, (const void*) &val);
+
+	return true;
+}
+
+
+static bool cb_set_dry_mute(RobWidget* handle, void* data)
+{
+	HarmonigiloUI* ui = (HarmonigiloUI*) data;
+	if (ui->disable_signals) {
+		return true;
+	}
+	const float val = robtk_cbtn_get_active(ui->dry_mute) ? 1.f : 0.f;
+	ui->write(ui->controller, HRM_DRY_MUTE, sizeof(float), 0, (const void*) &val);
+
+	return true;
+}
+
+
+static bool cb_set_dry_solo(RobWidget* handle, void* data)
+{
+	HarmonigiloUI* ui = (HarmonigiloUI*) data;
+	if (ui->disable_signals) {
+		return true;
+	}
+	const float val = robtk_cbtn_get_active(ui->dry_solo) ? 1.f : 0.f;
+	ui->write(ui->controller, HRM_DRY_SOLO, sizeof(float), 0, (const void*) &val);
+
 	return true;
 }
 
@@ -428,80 +513,112 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 
 	ui->annotation_font = pango_font_description_from_string("Mono 10px");
 
-	create_faceplate(ui);
-	ui->ctable = rob_table_new(/*rows*/ 6, /*cols*/ 5, FALSE);
+	//create_faceplate(ui);
+	ui->ctable = rob_table_new(/*rows*/ 8, /*cols*/ CHAN_NUM+2, FALSE);
 	ui->ctable->expose_event = box_expose_event;
 
-	ui->lbl_left = robtk_lbl_new("Left");
-	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_left), 1,2, 0,1, 0,20,RTK_EXPAND,RTK_SHRINK);
-	ui->lbl_right = robtk_lbl_new("Right");
-	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_right), 3,4, 0,1, 0,20,RTK_EXPAND,RTK_SHRINK);
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		char txt[16];
+		sprintf(txt, "Voice %d", i+1);
+		ui->lbl_chan[i] = robtk_lbl_new(txt);
+		rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_chan[i]), i+1, i+2, 0, 1, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-	ui->pitch_L = make_sized_robtk_dial(-100.0, 100.0, 1.0);
-	robtk_dial_set_default(ui->pitch_L, 0.0);
-	robtk_dial_set_callback(ui->pitch_L, cb_set_pitch_L, ui);
-	robtk_dial_annotation_callback(ui->pitch_L, dial_annotation_pitch, ui);
-	robtk_dial_set_surface(ui->pitch_L, ui->bg_pitch_L);
-	ui->pitch_R = make_sized_robtk_dial(-100.0, 100.0, 1.0);
-	robtk_dial_set_default(ui->pitch_R, 0.0);
-	robtk_dial_set_callback(ui->pitch_R, cb_set_pitch_R, ui);
-	robtk_dial_annotation_callback(ui->pitch_R, dial_annotation_pitch, ui);
-	robtk_dial_set_surface(ui->pitch_R, ui->bg_pitch_R);
+		ui->pitch[i] = make_sized_robtk_dial(-100.0, 100.0, 1.0);
+		robtk_dial_set_default(ui->pitch[i], 0.0);
+		robtk_dial_set_callback(ui->pitch[i], cb_set_pitch, ui);
+		robtk_dial_annotation_callback(ui->pitch[i], dial_annotation_pitch, ui);
+		//robtk_dial_set_surface(ui->pitch[i], ui->bg_pitch[i]);
+		rob_table_attach(ui->ctable, robtk_dial_widget(ui->pitch[i]), i+1,i+2, 1, 2, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-	rob_table_attach(ui->ctable, robtk_dial_widget(ui->pitch_L), 1,2, 1,2, 0,0,RTK_EXPAND,RTK_SHRINK);
-	rob_table_attach(ui->ctable, robtk_dial_widget(ui->pitch_R), 3,4, 1,2, 0,0,RTK_EXPAND,RTK_SHRINK);
+		ui->delay[i] = make_sized_robtk_dial(0.0, 50.0, 1.0);
+		robtk_dial_set_default(ui->delay[i], 0.0);
+		robtk_dial_set_callback(ui->delay[i], cb_set_delay, ui);
+		robtk_dial_annotation_callback(ui->delay[i], dial_annotation_ms, ui);
+		//robtk_dial_set_surface(ui->delay[i], ui->bg_delay[i]);
+		rob_table_attach(ui->ctable, robtk_dial_widget(ui->delay[i]), i+1,i+2, 2,3, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-	ui->lbl_pitch_L = robtk_lbl_new("Pitch left");
-	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_pitch_L), 0,1, 1,2, 0,0,RTK_EXPAND,RTK_SHRINK) ;
-	ui->lbl_pitch_R = robtk_lbl_new("Pitch right");
-	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_pitch_R), 4,5, 1,2, 0,0,RTK_EXPAND,RTK_SHRINK) ;
+		ui->pan[i] = make_sized_robtk_dial(0.0, 1.0, 0.05);
+		robtk_dial_set_default(ui->pan[i], 0.5);
+		robtk_dial_set_callback(ui->pan[i], cb_set_pan, ui);
+		//robtk_dial_set_surface(ui->pan[i], ui->bg_pan[i]);
+		rob_table_attach(ui->ctable, robtk_dial_widget(ui->pan[i]), i+1,i+2, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-	ui->delay_L = make_sized_robtk_dial(0.0, 50.0, 1.0);
-	robtk_dial_set_default(ui->delay_L, 0.0);
-	robtk_dial_set_callback(ui->delay_L, cb_set_delay_L, ui);
-	robtk_dial_annotation_callback(ui->delay_L, dial_annotation_ms, ui);
-	robtk_dial_set_surface(ui->delay_L, ui->bg_delay_L);
-	ui->delay_R = make_sized_robtk_dial(0.0, 50.0, 1.0);
-	robtk_dial_set_default(ui->delay_R, 0.0);
-	robtk_dial_set_callback(ui->delay_R, cb_set_delay_R, ui);
-	robtk_dial_annotation_callback(ui->delay_R, dial_annotation_ms, ui);
-	robtk_dial_set_surface(ui->delay_R, ui->bg_delay_R);
+		ui->gain[i] = make_sized_robtk_dial(-60.f, +6.f, 1.0);
+		robtk_dial_set_default(ui->gain[i], 0.0);
+		robtk_dial_set_callback(ui->gain[i], cb_set_gain, ui);
+		robtk_dial_annotation_callback(ui->gain[i], dial_annotation_db, ui);
+		//robtk_dial_set_surface(ui->gain[i], ui->bg_gain[i]);
+		rob_table_attach(ui->ctable, robtk_dial_widget(ui->gain[i]), i+1,i+2, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-	rob_table_attach(ui->ctable, robtk_dial_widget(ui->delay_L), 1,2, 2,3, 0,0,RTK_EXPAND,RTK_SHRINK);
-	rob_table_attach(ui->ctable, robtk_dial_widget(ui->delay_R), 3,4, 2,3, 0,0,RTK_EXPAND,RTK_SHRINK);
+		ui->sm_box[i] = rob_vbox_new(FALSE, 2);
 
-	ui->lbl_delay_L = robtk_lbl_new("Delay left");
-	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_delay_L), 0,1, 2,3, 10,0,RTK_EXPAND,RTK_SHRINK) ;
-	ui->lbl_delay_R = robtk_lbl_new("Delay right");
-	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_delay_R), 4,5, 2,3, 10,0,RTK_EXPAND,RTK_SHRINK) ;
+		ui->mute[i] = robtk_cbtn_new("Mute", GBT_LED_LEFT, false);
+		robtk_cbtn_set_color_on(ui->mute[i], 1.f, 1.f, 0.f);
+		robtk_cbtn_set_color_off(ui->mute[i], 0.2f, 0.2f, 0.f);
+		robtk_cbtn_set_callback(ui->mute[i], cb_set_mute, ui);
+		rob_vbox_child_pack(ui->sm_box[i], robtk_cbtn_widget(ui->mute[i]), false, false);
 
-	ui->panner_width = make_sized_robtk_dial(0.0, 1.0, 0.01);
-	robtk_dial_set_callback(ui->panner_width, cb_set_panner_width, ui);
+		ui->solo[i] = robtk_cbtn_new("Solo", GBT_LED_LEFT, false);
+		robtk_cbtn_set_color_on(ui->solo[i], 0.f, 1.f, 0.f);
+		robtk_cbtn_set_color_off(ui->solo[i], 0.0f, 0.2f, 0.f);
+		robtk_cbtn_set_callback(ui->solo[i], cb_set_solo, ui);
+		rob_vbox_child_pack(ui->sm_box[i], robtk_cbtn_widget(ui->solo[i]), false, false);
 
-	rob_table_attach(ui->ctable, robtk_dial_widget(ui->panner_width), 2,3, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK);
+		rob_table_attach(ui->ctable, ui->sm_box[i], i+1, i+2, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-	ui->lbl_panner_width = robtk_lbl_new("Panner width");
-	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_panner_width), 0,1, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK) ;
-	robtk_dial_set_surface(ui->panner_width, ui->bg_panner_width);
+	}
 
-	ui->dry_wet = make_sized_robtk_dial(0.0, 1.0, 0.01);
-	robtk_dial_set_callback(ui->dry_wet, cb_set_dry_wet, ui);
-	robtk_dial_annotation_callback(ui->dry_wet, dial_annotation_wet, ui);
-	robtk_dial_set_surface(ui->dry_wet, ui->bg_dry_wet);
+	ui->dry_pan = make_sized_robtk_dial(0.0, 1.0, 0.05);
+	robtk_dial_set_default(ui->dry_pan, 0.5);
+	robtk_dial_set_callback(ui->dry_pan, cb_set_dry_pan, ui);
+	//robtk_dial_set_surface(ui->dry_pan, ui->bg_pan);
+	rob_table_attach(ui->ctable, robtk_dial_widget(ui->dry_pan), 7,8, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-	rob_table_attach(ui->ctable, robtk_dial_widget(ui->dry_wet), 2,3, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK);
+	ui->dry_gain = make_sized_robtk_dial(-60.f, +6.f, 1.0);
+	robtk_dial_set_default(ui->dry_gain, 0.0);
+	robtk_dial_set_callback(ui->dry_gain, cb_set_dry_gain, ui);
+	robtk_dial_annotation_callback(ui->dry_gain, dial_annotation_db, ui);
+	//robtk_dial_set_surface(ui->dry_gain, ui->bg_dry_gain);
+	rob_table_attach(ui->ctable, robtk_dial_widget(ui->dry_gain), 7,8, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-	ui->lbl_dry_wet = robtk_lbl_new("dry/wet");
-	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_dry_wet), 0,1, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK) ;
+	ui->dry_sm_box = rob_vbox_new(FALSE, 2);
 
-	ui->left_darea = robtk_darea_new(ROUTE_WIDTH, 2.0*STEP_HEIGHT, draw_route_left, ui);
-	rob_table_attach(ui->ctable, robtk_darea_widget(ui->left_darea), 1,2, 3,5, 0,0,RTK_EXPAND,RTK_SHRINK);
+	ui->dry_mute = robtk_cbtn_new("Mute", GBT_LED_LEFT, false);
+	robtk_cbtn_set_color_on(ui->dry_mute, 1.f, 1.f, 0.f);
+	robtk_cbtn_set_color_off(ui->dry_mute, 0.2f, 0.2f, 0.f);
+	robtk_cbtn_set_callback(ui->dry_mute, cb_set_dry_mute, ui);
+	rob_vbox_child_pack(ui->dry_sm_box, robtk_cbtn_widget(ui->dry_mute), false, false);
 
-	ui->right_darea = robtk_darea_new(ROUTE_WIDTH, 2.0*STEP_HEIGHT, draw_route_right, ui);
-	rob_table_attach(ui->ctable, robtk_darea_widget(ui->right_darea), 3,4, 3,5, 0,0,RTK_EXPAND,RTK_SHRINK);
+	ui->dry_solo = robtk_cbtn_new("Solo", GBT_LED_LEFT, false);
+	robtk_cbtn_set_color_on(ui->dry_solo, 0.f, 1.f, 0.f);
+	robtk_cbtn_set_color_off(ui->dry_solo, 0.0f, 0.2f, 0.f);
+	robtk_cbtn_set_callback(ui->dry_solo, cb_set_dry_solo, ui);
+	rob_vbox_child_pack(ui->dry_sm_box, robtk_cbtn_widget(ui->dry_solo), false, false);
 
+	rob_table_attach(ui->ctable, ui->dry_sm_box, 7,8, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
+
+
+	ui->lbl_dry = robtk_lbl_new("Dry");
+	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_dry), 7,8, 0,1, 0,0,RTK_EXPAND,RTK_SHRINK);
+
+	ui->lbl_pitch = robtk_lbl_new("Pitch");
+	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_pitch), 0,1, 1,2, 0,0,RTK_EXPAND,RTK_SHRINK);
+	ui->lbl_delay = robtk_lbl_new("Delay");
+	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_delay), 0,1, 2,3, 0,0,RTK_EXPAND,RTK_SHRINK);
+	ui->lbl_pan = robtk_lbl_new("Pan");
+	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_pan), 0,1, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK);
+	ui->lbl_gain = robtk_lbl_new("Gain");
+	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_gain), 0,1, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK);
+
+	/*
+	printf("dry %x\n", robtk_lbl_widget(ui->lbl_dry));
+	printf("pitch %x\n", robtk_lbl_widget(ui->lbl_pitch));
+	printf("pitch df %x\n", ui->lbl_pitch->sf_txt);
+	printf("delay %x\n", robtk_lbl_widget(ui->lbl_delay));
+	printf("pan %x\n", robtk_lbl_widget(ui->lbl_pan));
+	printf("gain %x\n", robtk_lbl_widget(ui->lbl_gain));
+	*/
 	rob_hbox_child_pack(ui->hbox, ui->ctable, FALSE, FALSE);
-
 
 	return ui->hbox;
 }
@@ -534,6 +651,8 @@ instantiate(void* const ui_toplevel,
 	*widget = setup_toplevel(ui);
 	robwidget_make_toplevel(ui->hbox, ui_toplevel);
 
+	ui->disable_signals = true;
+
 	return ui;
 }
 
@@ -551,23 +670,32 @@ cleanup(LV2UI_Handle handle)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) handle;
 
-	robtk_dial_destroy(ui->pitch_L);
-	robtk_dial_destroy(ui->pitch_R);
-	robtk_dial_destroy(ui->delay_L);
-	robtk_dial_destroy(ui->delay_R);
-	robtk_dial_destroy(ui->dry_wet);
-	robtk_dial_destroy(ui->panner_width);
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		robtk_lbl_destroy(ui->lbl_chan[i]);
+		robtk_dial_destroy(ui->pitch[i]);
+		robtk_dial_destroy(ui->delay[i]);
+		robtk_dial_destroy(ui->pan[i]);
+		robtk_dial_destroy(ui->gain[i]);
+		robtk_cbtn_destroy(ui->mute[i]);
+		robtk_cbtn_destroy(ui->solo[i]);
+		rob_box_destroy(ui->sm_box[i]);
+	}
 
-	robtk_lbl_destroy(ui->lbl_left);
-	robtk_lbl_destroy(ui->lbl_right);
+	robtk_dial_destroy(ui->dry_pan);
+	robtk_dial_destroy(ui->dry_gain);
+	robtk_cbtn_destroy(ui->dry_mute);
+	robtk_cbtn_destroy(ui->dry_solo);
 
-	robtk_lbl_destroy(ui->lbl_pitch_L);
-	robtk_lbl_destroy(ui->lbl_pitch_R);
-	robtk_lbl_destroy(ui->lbl_delay_L);
-	robtk_lbl_destroy(ui->lbl_delay_R);
-	robtk_lbl_destroy(ui->lbl_dry_wet);
-	robtk_lbl_destroy(ui->lbl_panner_width);
+	rob_box_destroy(ui->dry_sm_box);
 
+	robtk_lbl_destroy(ui->lbl_dry);
+
+	robtk_lbl_destroy(ui->lbl_pitch);
+	robtk_lbl_destroy(ui->lbl_delay);
+	robtk_lbl_destroy(ui->lbl_pan);
+	robtk_lbl_destroy(ui->lbl_gain);
+
+	/*
 	cairo_surface_destroy(ui->bg_pitch_L);
 	cairo_surface_destroy(ui->bg_pitch_R);
 	cairo_surface_destroy(ui->bg_delay_L);
@@ -575,13 +703,14 @@ cleanup(LV2UI_Handle handle)
 	cairo_surface_destroy(ui->bg_dry_wet);
 	cairo_surface_destroy(ui->bg_panner_width);
 
-	rob_box_destroy(ui->ctable);
-	rob_box_destroy(ui->hbox);
-
 	robtk_darea_destroy(ui->left_darea);
 	robtk_darea_destroy(ui->right_darea);
 
 	pango_font_description_free(ui->annotation_font);
+	*/
+
+	rob_box_destroy(ui->ctable);
+	rob_box_destroy(ui->hbox);
 
 	free(ui);
 	printf("Cleaned up\n");
@@ -595,10 +724,10 @@ extension_data(const char* uri)
 
 static void
 port_event(LV2UI_Handle handle,
-           uint32_t     port,
-           uint32_t     buffer_size,
-           uint32_t     format,
-           const void*  buffer)
+	   uint32_t     port,
+	   uint32_t     buffer_size,
+	   uint32_t     format,
+	   const void*  buffer)
 {
 	if (format != 0) {
 		return;
@@ -607,26 +736,45 @@ port_event(LV2UI_Handle handle,
 	HarmonigiloUI* ui = (HarmonigiloUI*) handle;
 	const float val = *(const float*)buffer;
 
-	switch ((PortIndex)port) {
-	case HRM_DELAY_L:
-		robtk_dial_set_value(ui->delay_L, val);
-		break;
-	case HRM_DELAY_R:
-		robtk_dial_set_value(ui->delay_R, val);
-		break;
-	case HRM_PITCH_L:
-		robtk_dial_set_value(ui->pitch_L, val);
-		break;
-	case HRM_PITCH_R:
-		robtk_dial_set_value(ui->pitch_R, val);
-		break;
-	case HRM_DRYWET:
-		robtk_dial_set_value(ui->dry_wet, val);
-		break;
-	case HRM_PANNER_WIDTH:
-		robtk_dial_set_value(ui->panner_width, val);
-		break;
-	default:
-		break;
+	ui->disable_signals = true;
+
+	const uint32_t num = port/6;
+	if (num < CHAN_NUM) {
+		printf("Port: %d %d %d %f\n", port, port/4, port % 4, val);
+		switch ((PortIndex) (port % 6)) {
+		case HRM_DELAY_0:
+			robtk_dial_set_value(ui->delay[num], val);
+			break;
+		case HRM_PITCH_0:
+			robtk_dial_set_value(ui->pitch[num], val);
+			break;
+		case HRM_PAN_0:
+			robtk_dial_set_value(ui->pan[num], val);
+			break;
+		case HRM_GAIN_0:
+			robtk_dial_set_value(ui->gain[num], val);
+			break;
+		case HRM_MUTE_0:
+			robtk_cbtn_set_active(ui->mute[num], val>0.5);
+			break;
+		case HRM_SOLO_0:
+			robtk_cbtn_set_active(ui->solo[num], val>0.5);
+			break;
+		default:
+			break;
+		}
+	} else {
+ 		switch ((PortIndex) (port)) {
+		case HRM_DRY_PAN:
+			robtk_dial_set_value(ui->dry_pan, val);
+			break;
+		case HRM_DRY_GAIN:
+			robtk_dial_set_value(ui->dry_gain, val);
+			break;
+		default:
+			break;
+		}
 	}
+
+	ui->disable_signals = false;
 }
