@@ -25,6 +25,8 @@ making them sound more voluminous. This is achieved by the following measures:
 ## Usage
 There are the following controls
 
+* Enabled 1-6 (enables/disables the voices)
+
 * Pitch 1-6 (the pitch shifts)
 
 * Delay 1-6 (the delays)
@@ -37,7 +39,13 @@ There are the following controls
 
 * Dry Gain (the gain of the dry signal)
 
-Moreover each voice as well as the dry signal has a mute and solo button.
+Moreover each voice as well as the dry signal has a mute and solo button. The
+difference between muting and disabling a voice is, that muting just mutes the
+voice but the voice remains processed. Whereas disabling a voice means, that
+the voice is no longer processed. This difference is important because
+processing has an influence on the latency of the plugin. So disable a voice,
+if you don't need it at all. Mute it, if you just want to check what it sounds
+like without that specific voice.
 
 ## Todo
 

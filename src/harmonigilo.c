@@ -163,6 +163,7 @@ get_sample_from_sample_buffer(SampleBuffer* sb, int rel_pos)
 
 
 typedef struct {
+	const float* enabled;
 	const float* delay;
 	const float* pitch;
 	const float* pan;
@@ -242,9 +243,12 @@ connect_port(LV2_Handle instance,
 {
 	Harmonigilo* hrm = (Harmonigilo*)instance;
 
-	if (port < CHAN_NUM*6) {
-		Channel* ch = &hrm->channel[port/6];
-		switch (port % 6) {
+	if (port < CHAN_NUM*7) {
+		Channel* ch = &hrm->channel[port/7];
+		switch (port % 7) {
+		case HRM_ENABLED_0:
+			ch->enabled = (const float*)data;
+			break;
 		case HRM_DELAY_0:
 			ch->delay = (const float*)data;
 			break;
@@ -371,6 +375,9 @@ run(LV2_Handle instance, uint32_t n_samples)
 	}
 
 	for (Channel* ch = hrm->channel; ch < hrm->channel+CHAN_NUM; ++ch) {
+		if (*ch->enabled < 0.5) {
+			continue;
+		}
 		rubberband_set_pitch_scale(ch->pitcher, pow(2.0, (*ch->pitch)/1200));
 
 		ch->latency = 2*rubberband_get_latency(ch->pitcher);
@@ -399,6 +406,9 @@ run(LV2_Handle instance, uint32_t n_samples)
 	}
 
 	for (Channel* ch = hrm->channel; ch < hrm->channel+CHAN_NUM; ++ch) {
+		if (*ch->enabled < 0.5) {
+			continue;
+		}
 		ch->delay_samples -= latency_correction;
 
 		pitch_shift(hrm, ch, n_samples);
@@ -419,6 +429,9 @@ run(LV2_Handle instance, uint32_t n_samples)
 
 
 	for (Channel* ch = hrm->channel; ch < hrm->channel+CHAN_NUM; ++ch) {
+		if (*ch->enabled < 0.5) {
+			continue;
+		}
 		const float pan = *ch->pan;
 		float gain = from_dB(*ch->gain);
 		if ((*ch->mute>0.5) || (solo && (*ch->solo<=0.5))) {

@@ -39,9 +39,7 @@ typedef struct {
 	RobWidget* hbox;
 	RobWidget* ctable;
 
-	RobTkLbl* lbl_chan[CHAN_NUM];
-	RobTkLbl* lbl_dry;
-
+	RobTkCBtn* voice_enabled[CHAN_NUM];
 	RobTkDial* pitch[CHAN_NUM];
 	RobTkDial* delay[CHAN_NUM];
 	RobTkDial* pan[CHAN_NUM];
@@ -49,6 +47,8 @@ typedef struct {
 	RobWidget* sm_box[CHAN_NUM];
 	RobTkCBtn* mute[CHAN_NUM];
 	RobTkCBtn* solo[CHAN_NUM];
+
+	RobTkLbl* lbl_dry;
 
 	RobTkDial* dry_gain;
 	RobTkDial* dry_pan;
@@ -375,6 +375,27 @@ draw_route_middle(HarmonigiloUI* ui)
 	*/
 }
 
+
+static bool cb_set_voice_enabled(RobWidget* handle, void* data)
+{
+	HarmonigiloUI* ui = (HarmonigiloUI*) data;
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		const bool enabled = robtk_cbtn_get_active(ui->voice_enabled[i]);
+		const float val = enabled ? 1.f : 0.f;
+		robtk_dial_set_sensitive(ui->pitch[i], enabled);
+		robtk_dial_set_sensitive(ui->delay[i], enabled);
+		robtk_dial_set_sensitive(ui->pan[i], enabled);
+		robtk_dial_set_sensitive(ui->gain[i], enabled);
+		robtk_cbtn_set_sensitive(ui->mute[i], enabled);
+		robtk_cbtn_set_sensitive(ui->solo[i], enabled);
+		if (!ui->disable_signals) {
+			ui->write(ui->controller, HRM_ENABLED_0+(7*i), sizeof(float), 0, (const void*) &val);
+		}
+	}
+	return true;
+}
+
+
 static bool cb_set_pitch(RobWidget* handle, void* data)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) data;
@@ -383,7 +404,7 @@ static bool cb_set_pitch(RobWidget* handle, void* data)
 	}
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		const float val = robtk_dial_get_value(ui->pitch[i]);
-		ui->write(ui->controller, HRM_PITCH_0+(6*i), sizeof(float), 0, (const void*) &val);
+		ui->write(ui->controller, HRM_PITCH_0+(7*i), sizeof(float), 0, (const void*) &val);
 	}
 	return true;
 }
@@ -396,7 +417,7 @@ static bool cb_set_delay(RobWidget* handle, void* data)
 	}
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		const float val = robtk_dial_get_value(ui->delay[i]);
-		ui->write(ui->controller, HRM_DELAY_0+(6*i), sizeof(float), 0, (const void*) &val);
+		ui->write(ui->controller, HRM_DELAY_0+(7*i), sizeof(float), 0, (const void*) &val);
 	}
 	return true;
 }
@@ -409,7 +430,7 @@ static bool cb_set_pan(RobWidget* handle, void* data)
 	}
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		const float val = robtk_dial_get_value(ui->pan[i]);
-		ui->write(ui->controller, HRM_PAN_0+(6*i), sizeof(float), 0, (const void*) &val);
+		ui->write(ui->controller, HRM_PAN_0+(7*i), sizeof(float), 0, (const void*) &val);
 	}
 	return true;
 }
@@ -422,7 +443,7 @@ static bool cb_set_gain(RobWidget* handle, void* data)
 	}
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		const float val = robtk_dial_get_value(ui->gain[i]);
-		ui->write(ui->controller, HRM_GAIN_0+(6*i), sizeof(float), 0, (const void*) &val);
+		ui->write(ui->controller, HRM_GAIN_0+(7*i), sizeof(float), 0, (const void*) &val);
 	}
 	return true;
 }
@@ -435,7 +456,7 @@ static bool cb_set_mute(RobWidget* handle, void* data)
 	}
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		const float val = robtk_cbtn_get_active(ui->mute[i]) ? 1.f : 0.f;
-		ui->write(ui->controller, HRM_MUTE_0+(6*i), sizeof(float), 0, (const void*) &val);
+		ui->write(ui->controller, HRM_MUTE_0+(7*i), sizeof(float), 0, (const void*) &val);
 	}
 	return true;
 }
@@ -448,10 +469,11 @@ static bool cb_set_solo(RobWidget* handle, void* data)
 	}
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		const float val = robtk_cbtn_get_active(ui->solo[i]) ? 1.f : 0.f;
-		ui->write(ui->controller, HRM_SOLO_0+(6*i), sizeof(float), 0, (const void*) &val);
+		ui->write(ui->controller, HRM_SOLO_0+(7*i), sizeof(float), 0, (const void*) &val);
 	}
 	return true;
 }
+
 static bool cb_set_dry_pan(RobWidget* handle, void* data)
 {
 	HarmonigiloUI* ui = (HarmonigiloUI*) data;
@@ -520,8 +542,9 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		char txt[16];
 		sprintf(txt, "Voice %d", i+1);
-		ui->lbl_chan[i] = robtk_lbl_new(txt);
-		rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_chan[i]), i+1, i+2, 0, 1, 0,0,RTK_EXPAND,RTK_SHRINK);
+		ui->voice_enabled[i] = robtk_cbtn_new(txt, GBT_LED_LEFT, false);
+		robtk_cbtn_set_callback(ui->voice_enabled[i], cb_set_voice_enabled, ui);
+		rob_table_attach(ui->ctable, robtk_cbtn_widget(ui->voice_enabled[i]), i+1, i+2, 0, 1, 0,0,RTK_EXPAND,RTK_SHRINK);
 
 		ui->pitch[i] = make_sized_robtk_dial(-100.0, 100.0, 1.0);
 		robtk_dial_set_default(ui->pitch[i], 0.0);
@@ -671,7 +694,7 @@ cleanup(LV2UI_Handle handle)
 	HarmonigiloUI* ui = (HarmonigiloUI*) handle;
 
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
-		robtk_lbl_destroy(ui->lbl_chan[i]);
+		robtk_cbtn_destroy(ui->voice_enabled[i]);
 		robtk_dial_destroy(ui->pitch[i]);
 		robtk_dial_destroy(ui->delay[i]);
 		robtk_dial_destroy(ui->pan[i]);
@@ -738,10 +761,13 @@ port_event(LV2UI_Handle handle,
 
 	ui->disable_signals = true;
 
-	const uint32_t num = port/6;
+	const uint32_t num = port/7;
 	if (num < CHAN_NUM) {
 		printf("Port: %d %d %d %f\n", port, port/4, port % 4, val);
-		switch ((PortIndex) (port % 6)) {
+		switch ((PortIndex) (port % 7)) {
+		case HRM_ENABLED_0:
+			robtk_cbtn_set_active(ui->voice_enabled[num], val>0.5);
+			break;
 		case HRM_DELAY_0:
 			robtk_dial_set_value(ui->delay[num], val);
 			break;
