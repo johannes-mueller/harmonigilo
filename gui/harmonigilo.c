@@ -682,6 +682,15 @@ static RobTkDial* make_sized_robtk_dial(float min, float max, float step)
 	return robtk_dial_new_with_size(min, max, step, ROUTE_WIDTH, STEP_HEIGHT, DIAL_CX, DIAL_CY, DIAL_RADIUS);
 }
 
+static void add_scale_markers(RobTkScale* s)
+{
+	char buf[8];
+	for (float v=-60; v<=0.f; v+=10.f) {
+		sprintf(buf, "%.0f", v);
+		robtk_scale_add_mark(s, v, buf);
+	}
+}
+
 static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 {
 	ui->hbox = rob_hbox_new(FALSE, 2);
@@ -738,7 +747,7 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 		ui->gain[i] = robtk_scale_new(-60.f, +6.f, 0.1, false);
 		robtk_scale_set_default(ui->gain[i], 0.0);
 		robtk_scale_set_callback(ui->gain[i], cb_set_gain, ui);
-		//robtk_scale_set_surface(ui->gain[i], ui->bg_gain[i]);
+		add_scale_markers(ui->gain[i]);
 		rob_table_attach(ui->ctable, robtk_scale_widget(ui->gain[i]), i+1,i+2, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
 	}
 
@@ -767,7 +776,7 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	ui->dry_gain = robtk_scale_new(-60.f, +6.f, 0.1, false);
 	robtk_scale_set_default(ui->dry_gain, 0.0);
 	robtk_scale_set_callback(ui->dry_gain, cb_set_dry_gain, ui);
-	//robtk_scale_set_surface(ui->dry_gain, ui->bg_dry_gain);
+	add_scale_markers(ui->dry_gain);
 	rob_table_attach(ui->ctable, robtk_scale_widget(ui->dry_gain), 7,8, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
 
 	ui->lbl_dry = robtk_lbl_new("Dry");
@@ -809,7 +818,6 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	*/
 	rob_hbox_child_pack(ui->hbox, ui->ctable, FALSE, FALSE);
 	rob_hbox_child_pack(ui->hbox, ui->master_box, FALSE, FALSE);
-
 
 	return ui->hbox;
 }
