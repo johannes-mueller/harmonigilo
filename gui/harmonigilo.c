@@ -409,7 +409,9 @@ static float get_voice_sum_db(const HarmonigiloUI* ui)
 {
 	float sum_db = 0.f;
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
-		sum_db += pow(10.f, robtk_scale_get_value(ui->gain[i])/10.f);
+		if (robtk_cbtn_get_active(ui->voice_enabled[i])) {
+			sum_db += pow(10.f, robtk_scale_get_value(ui->gain[i])/10.f);
+		}
 	}
 	return 10.f * log10(sum_db);
 }
@@ -425,7 +427,9 @@ static void adjust_master_gain(HarmonigiloUI* ui)
 
 	float sum_gain = pow(10.f, robtk_scale_get_value(ui->dry_gain)/10.f);
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
-		sum_gain += pow(10.f, robtk_scale_get_value(ui->gain[i])/10.f);
+		if (robtk_cbtn_get_active(ui->voice_enabled[i])) {
+			sum_gain += pow(10.f, robtk_scale_get_value(ui->gain[i])/10.f);
+		}
 	}
 
 	sum_gain = 10.f * log10(sum_gain);
@@ -468,6 +472,11 @@ static bool cb_set_voice_enabled(RobWidget* handle, void* data)
 			ui->write(ui->controller, HRM_ENABLED_0+(7*i), sizeof(float), 0, (const void*) &val);
 		}
 	}
+
+	ui->master_dry_wet_active = false;
+	adjust_master_gain(ui);
+	adjust_master_dry_wet(ui);
+
 	return true;
 }
 
@@ -625,6 +634,9 @@ static bool cb_set_master_gain(RobWidget* handle, void* data)
 	ui->disable_signals = true;
 
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		if (!robtk_cbtn_get_active(ui->voice_enabled[i])) {
+			continue;
+		}
 		const float new_val = db_limits(robtk_scale_get_value(ui->gain[i]) - db_diff);
 		robtk_scale_set_value(ui->gain[i], new_val);
 		ui->write(ui->controller, HRM_GAIN_0+(7*i), sizeof(float), 0, (const void*) &new_val);
@@ -665,6 +677,9 @@ static bool cb_set_master_dry_wet(RobWidget* handle, void* data)
 	ui->write(ui->controller, HRM_DRY_GAIN, sizeof(float), 0, (const void*) &dry_db);
 
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		if (!robtk_cbtn_get_active(ui->voice_enabled[i])) {
+			continue;
+		}
 		const float val = db_limits(robtk_scale_get_value(ui->gain[i]) - db_diff);
 		robtk_scale_set_value(ui->gain[i], val);
 		ui->write(ui->controller, HRM_GAIN_0+(7*i), sizeof(float), 0, (const void*) &val);
