@@ -43,15 +43,15 @@ typedef struct {
 	RobTkDial* pitch[CHAN_NUM];
 	RobTkDial* delay[CHAN_NUM];
 	RobTkDial* pan[CHAN_NUM];
-	RobTkDial* gain[CHAN_NUM];
+	RobTkScale* gain[CHAN_NUM];
 	RobWidget* sm_box[CHAN_NUM];
 	RobTkCBtn* mute[CHAN_NUM];
 	RobTkCBtn* solo[CHAN_NUM];
 
 	RobTkLbl* lbl_dry;
 
-	RobTkDial* dry_gain;
 	RobTkDial* dry_pan;
+	RobTkScale* dry_gain;
 	RobWidget* dry_sm_box;
 	RobTkCBtn* dry_mute;
 	RobTkCBtn* dry_solo;
@@ -385,7 +385,7 @@ static bool cb_set_voice_enabled(RobWidget* handle, void* data)
 		robtk_dial_set_sensitive(ui->pitch[i], enabled);
 		robtk_dial_set_sensitive(ui->delay[i], enabled);
 		robtk_dial_set_sensitive(ui->pan[i], enabled);
-		robtk_dial_set_sensitive(ui->gain[i], enabled);
+		robtk_scale_set_sensitive(ui->gain[i], enabled);
 		robtk_cbtn_set_sensitive(ui->mute[i], enabled);
 		robtk_cbtn_set_sensitive(ui->solo[i], enabled);
 		if (!ui->disable_signals) {
@@ -442,7 +442,7 @@ static bool cb_set_gain(RobWidget* handle, void* data)
 		return true;
 	}
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
-		const float val = robtk_dial_get_value(ui->gain[i]);
+		const float val = robtk_scale_get_value(ui->gain[i]);
 		ui->write(ui->controller, HRM_GAIN_0+(7*i), sizeof(float), 0, (const void*) &val);
 	}
 	return true;
@@ -492,7 +492,7 @@ static bool cb_set_dry_gain(RobWidget* handle, void* data)
 	if (ui->disable_signals) {
 		return true;
 	}
-	const float val = robtk_dial_get_value(ui->dry_gain);
+	const float val = robtk_scale_get_value(ui->dry_gain);
 	ui->write(ui->controller, HRM_DRY_GAIN, sizeof(float), 0, (const void*) &val);
 
 	return true;
@@ -566,13 +566,6 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 		//robtk_dial_set_surface(ui->pan[i], ui->bg_pan[i]);
 		rob_table_attach(ui->ctable, robtk_dial_widget(ui->pan[i]), i+1,i+2, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-		ui->gain[i] = make_sized_robtk_dial(-60.f, +6.f, 1.0);
-		robtk_dial_set_default(ui->gain[i], 0.0);
-		robtk_dial_set_callback(ui->gain[i], cb_set_gain, ui);
-		robtk_dial_annotation_callback(ui->gain[i], dial_annotation_db, ui);
-		//robtk_dial_set_surface(ui->gain[i], ui->bg_gain[i]);
-		rob_table_attach(ui->ctable, robtk_dial_widget(ui->gain[i]), i+1,i+2, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK);
-
 		ui->sm_box[i] = rob_vbox_new(FALSE, 2);
 
 		ui->mute[i] = robtk_cbtn_new("Mute", GBT_LED_LEFT, false);
@@ -587,8 +580,13 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 		robtk_cbtn_set_callback(ui->solo[i], cb_set_solo, ui);
 		rob_vbox_child_pack(ui->sm_box[i], robtk_cbtn_widget(ui->solo[i]), false, false);
 
-		rob_table_attach(ui->ctable, ui->sm_box[i], i+1, i+2, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
+		rob_table_attach(ui->ctable, ui->sm_box[i], i+1, i+2, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK);
 
+		ui->gain[i] = robtk_scale_new(-60.f, +6.f, 1.0, false);
+		robtk_scale_set_default(ui->gain[i], 0.0);
+		robtk_scale_set_callback(ui->gain[i], cb_set_gain, ui);
+		//robtk_scale_set_surface(ui->gain[i], ui->bg_gain[i]);
+		rob_table_attach(ui->ctable, robtk_scale_widget(ui->gain[i]), i+1,i+2, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
 	}
 
 	ui->dry_pan = make_sized_robtk_dial(0.0, 1.0, 0.05);
@@ -596,13 +594,6 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	robtk_dial_set_callback(ui->dry_pan, cb_set_dry_pan, ui);
 	//robtk_dial_set_surface(ui->dry_pan, ui->bg_pan);
 	rob_table_attach(ui->ctable, robtk_dial_widget(ui->dry_pan), 7,8, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK);
-
-	ui->dry_gain = make_sized_robtk_dial(-60.f, +6.f, 1.0);
-	robtk_dial_set_default(ui->dry_gain, 0.0);
-	robtk_dial_set_callback(ui->dry_gain, cb_set_dry_gain, ui);
-	robtk_dial_annotation_callback(ui->dry_gain, dial_annotation_db, ui);
-	//robtk_dial_set_surface(ui->dry_gain, ui->bg_dry_gain);
-	rob_table_attach(ui->ctable, robtk_dial_widget(ui->dry_gain), 7,8, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK);
 
 	ui->dry_sm_box = rob_vbox_new(FALSE, 2);
 
@@ -618,7 +609,13 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	robtk_cbtn_set_callback(ui->dry_solo, cb_set_dry_solo, ui);
 	rob_vbox_child_pack(ui->dry_sm_box, robtk_cbtn_widget(ui->dry_solo), false, false);
 
-	rob_table_attach(ui->ctable, ui->dry_sm_box, 7,8, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
+	rob_table_attach(ui->ctable, ui->dry_sm_box, 7,8, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK);
+
+	ui->dry_gain = robtk_scale_new(-60.f, +6.f, 1.0, false);
+	robtk_scale_set_default(ui->dry_gain, 0.0);
+	robtk_scale_set_callback(ui->dry_gain, cb_set_dry_gain, ui);
+	//robtk_scale_set_surface(ui->dry_gain, ui->bg_dry_gain);
+	rob_table_attach(ui->ctable, robtk_scale_widget(ui->dry_gain), 7,8, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
 
 
 	ui->lbl_dry = robtk_lbl_new("Dry");
@@ -631,7 +628,7 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	ui->lbl_pan = robtk_lbl_new("Pan");
 	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_pan), 0,1, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK);
 	ui->lbl_gain = robtk_lbl_new("Gain");
-	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_gain), 0,1, 4,5, 0,0,RTK_EXPAND,RTK_SHRINK);
+	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_gain), 0,1, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
 
 	/*
 	printf("dry %x\n", robtk_lbl_widget(ui->lbl_dry));
@@ -698,14 +695,14 @@ cleanup(LV2UI_Handle handle)
 		robtk_dial_destroy(ui->pitch[i]);
 		robtk_dial_destroy(ui->delay[i]);
 		robtk_dial_destroy(ui->pan[i]);
-		robtk_dial_destroy(ui->gain[i]);
+		robtk_scale_destroy(ui->gain[i]);
 		robtk_cbtn_destroy(ui->mute[i]);
 		robtk_cbtn_destroy(ui->solo[i]);
 		rob_box_destroy(ui->sm_box[i]);
 	}
 
 	robtk_dial_destroy(ui->dry_pan);
-	robtk_dial_destroy(ui->dry_gain);
+	robtk_scale_destroy(ui->dry_gain);
 	robtk_cbtn_destroy(ui->dry_mute);
 	robtk_cbtn_destroy(ui->dry_solo);
 
@@ -778,7 +775,7 @@ port_event(LV2UI_Handle handle,
 			robtk_dial_set_value(ui->pan[num], val);
 			break;
 		case HRM_GAIN_0:
-			robtk_dial_set_value(ui->gain[num], val);
+			robtk_scale_set_value(ui->gain[num], val);
 			break;
 		case HRM_MUTE_0:
 			robtk_cbtn_set_active(ui->mute[num], val>0.5);
@@ -795,7 +792,7 @@ port_event(LV2UI_Handle handle,
 			robtk_dial_set_value(ui->dry_pan, val);
 			break;
 		case HRM_DRY_GAIN:
-			robtk_dial_set_value(ui->dry_gain, val);
+			robtk_scale_set_value(ui->dry_gain, val);
 			break;
 		default:
 			break;
