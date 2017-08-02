@@ -419,11 +419,8 @@ static float get_voice_sum_db(const HarmonigiloUI* ui)
 static void adjust_master_gain(HarmonigiloUI* ui)
 {
 	if (ui->master_dry_wet_active) {
-		printf("not adjusting master gain\n");
 		return;
 	}
-
-	printf("adjusting master gain\n");
 
 	float sum_gain = pow(10.f, robtk_scale_get_value(ui->dry_gain)/10.f);
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
@@ -438,8 +435,6 @@ static void adjust_master_gain(HarmonigiloUI* ui)
 	ui->disable_signals = true;
 	robtk_dial_set_value(ui->master_gain, sum_gain);
 	ui->disable_signals = tmp;
-
-	//printf("%s %f %f\n", __func__, sum_gain, robtk_dial_get_value(ui->master_gain));
 	ui->old_master_gain = sum_gain;
 }
 
@@ -526,7 +521,6 @@ static bool cb_set_gain(RobWidget* handle, void* data)
 	if (ui->disable_signals) {
 		return true;
 	}
-	printf("Enabling\n");
 	ui->master_dry_wet_active = false;
 
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
@@ -582,7 +576,6 @@ static bool cb_set_dry_gain(RobWidget* handle, void* data)
 	if (ui->disable_signals) {
 		return true;
 	}
-	printf("Enabling\n");
 	ui->master_dry_wet_active = false;
 
 	const float val = robtk_scale_get_value(ui->dry_gain);
@@ -629,8 +622,6 @@ static bool cb_set_master_gain(RobWidget* handle, void* data)
 	const float db_diff = ui->old_master_gain - val;
 	ui->old_master_gain = val;
 
-	//printf("%s %f %f\n", __func__, val, scale);
-
 	ui->disable_signals = true;
 
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
@@ -658,7 +649,6 @@ static bool cb_set_master_dry_wet(RobWidget* handle, void* data)
 		return true;
 	}
 
-	printf("Disabling\n");
 	ui->master_dry_wet_active = true;
 
 	const float dry_wet = robtk_dial_get_value(ui->master_dry_wet);
@@ -668,8 +658,6 @@ static bool cb_set_master_dry_wet(RobWidget* handle, void* data)
 	const float sum_db = get_voice_sum_db(ui);
 
 	const float db_diff = sum_db - to_dB(dry_wet*master_gain);
-
-	//printf("%s %f %f\n", __func__, dry_db, db_diff);
 
 	ui->disable_signals = true;
 
@@ -923,7 +911,6 @@ cleanup(LV2UI_Handle handle)
 	rob_box_destroy(ui->hbox);
 
 	free(ui);
-	printf("Cleaned up\n");
 }
 
 static const void*
@@ -965,7 +952,6 @@ port_event(LV2UI_Handle handle,
 			robtk_dial_set_value(ui->pan[num], val);
 			break;
 		case HRM_GAIN_0:
-			printf("Voice gain %d: %f\n", num, val);
 			robtk_scale_set_value(ui->gain[num], val);
 			adjust_master_gain(ui);
 			adjust_master_gain(ui);
@@ -985,7 +971,6 @@ port_event(LV2UI_Handle handle,
 			robtk_dial_set_value(ui->dry_pan, val);
 			break;
 		case HRM_DRY_GAIN:
-			printf("Dry gain: %f\n", val);
 			robtk_scale_set_value(ui->dry_gain, val);
 			adjust_master_gain(ui);
 			adjust_master_dry_wet(ui);
