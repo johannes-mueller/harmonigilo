@@ -62,10 +62,12 @@ typedef struct {
 	RobTkLbl* lbl_gain;
 
 	RobWidget* master_box;
+	RobTkDial* master_dry_wet;
 	RobTkDial* master_gain;
 
 	float old_master_gain;
 
+	RobTkLbl* lbl_master_dry_wet;
 	RobTkLbl* lbl_master_gain;
 
 	RobTkDarea* left_darea;
@@ -381,6 +383,16 @@ draw_route_middle(HarmonigiloUI* ui)
 	*/
 }
 
+static inline float
+from_dB(float gdb) {
+	return (exp(gdb/20.f*log(10.f)));
+}
+
+static inline float
+to_dB(float g) {
+	return (20.f*log10(g));
+}
+
 static float db_limits(float val)
 {
 	if (val > 6.f) {
@@ -390,6 +402,15 @@ static float db_limits(float val)
 		return -60.f;
 	}
 	return val;
+}
+
+static float get_voice_sum_db(const HarmonigiloUI* ui)
+{
+	float sum_db = 0.f;
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		sum_db += pow(10.f, robtk_scale_get_value(ui->gain[i])/10.f);
+	}
+	return 10.f * log10(sum_db);
 }
 
 static void adjust_master_gain(HarmonigiloUI* ui)
@@ -408,6 +429,19 @@ static void adjust_master_gain(HarmonigiloUI* ui)
 
 	//printf("%s %f %f\n", __func__, sum_gain, robtk_dial_get_value(ui->master_gain));
 	ui->old_master_gain = sum_gain;
+}
+
+static void adjust_master_dry_wet(HarmonigiloUI* ui)
+{
+	const float wet = from_dB(get_voice_sum_db(ui));
+	const float dry = from_dB(robtk_scale_get_value(ui->dry_gain));
+
+	assert(dry+wet != 0.f);
+
+	bool tmp = ui->disable_signals;
+	ui->disable_signals = true;
+	robtk_dial_set_value(ui->master_dry_wet, wet/(dry+wet));
+	ui->disable_signals = tmp;
 }
 
 static bool cb_set_voice_enabled(RobWidget* handle, void* data)
@@ -480,6 +514,7 @@ static bool cb_set_gain(RobWidget* handle, void* data)
 		ui->write(ui->controller, HRM_GAIN_0+(7*i), sizeof(float), 0, (const void*) &val);
 	}
 	adjust_master_gain(ui);
+	adjust_master_dry_wet(ui);
 	return true;
 }
 
@@ -531,6 +566,7 @@ static bool cb_set_dry_gain(RobWidget* handle, void* data)
 	ui->write(ui->controller, HRM_DRY_GAIN, sizeof(float), 0, (const void*) &val);
 
 	adjust_master_gain(ui);
+	adjust_master_dry_wet(ui);
 	return true;
 }
 
@@ -567,7 +603,7 @@ static bool cb_set_master_gain(RobWidget* handle, void* data)
 		return true;
 	}
 	const float val = robtk_dial_get_value(ui->master_gain);
-	const float scale = val-ui->old_master_gain;
+	const float db_diff = ui->old_master_gain - val;
 	ui->old_master_gain = val;
 
 	//printf("%s %f %f\n", __func__, val, scale);
@@ -575,12 +611,42 @@ static bool cb_set_master_gain(RobWidget* handle, void* data)
 	ui->disable_signals = true;
 
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
-		const float new_val = db_limits(robtk_scale_get_value(ui->gain[i]) + scale);
+		const float new_val = db_limits(robtk_scale_get_value(ui->gain[i]) - db_diff);
 		robtk_scale_set_value(ui->gain[i], new_val);
 	}
 
-	const float new_val = db_limits(robtk_scale_get_value(ui->dry_gain) + scale);
+	const float new_val = db_limits(robtk_scale_get_value(ui->dry_gain) - db_diff);
 	robtk_scale_set_value(ui->dry_gain, new_val);
+
+	ui->disable_signals = false;
+	return true;
+}
+
+static bool cb_set_master_dry_wet(RobWidget* handle, void* data)
+{
+	HarmonigiloUI* ui = (HarmonigiloUI*) data;
+	if (ui->disable_signals) {
+		return true;
+	}
+
+	const float dry_wet = robtk_dial_get_value(ui->master_dry_wet);
+	const float master_gain = from_dB(robtk_dial_get_value(ui->master_gain));
+
+	const float dry_db = to_dB((1.f-dry_wet)*master_gain);
+	const float sum_db = get_voice_sum_db(ui);
+
+	const float db_diff = sum_db - to_dB(dry_wet*master_gain);
+
+	printf("%s %f %f\n", __func__, dry_db, db_diff);
+
+	ui->disable_signals = true;
+
+	robtk_scale_set_value(ui->dry_gain, dry_db);
+
+	for (uint32_t i=0; i<CHAN_NUM; ++i) {
+		const float val = db_limits(robtk_scale_get_value(ui->gain[i]) - db_diff);
+		robtk_scale_set_value(ui->gain[i], val);
+	}
 
 	ui->disable_signals = false;
 	return true;
@@ -691,7 +757,6 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	ui->lbl_gain = robtk_lbl_new("Gain");
 	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_gain), 0,1, 5,6, 0,0,RTK_EXPAND,RTK_SHRINK);
 
-
 	ui->master_box = rob_vbox_new(FALSE, 10);
 
 	ui->lbl_master_gain = robtk_lbl_new("Master Gain");
@@ -701,6 +766,14 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	robtk_dial_annotation_callback(ui->master_gain, dial_annotation_db, ui);
 	robtk_dial_set_callback(ui->master_gain, cb_set_master_gain, ui);
 	rob_vbox_child_pack(ui->master_box, robtk_dial_widget(ui->master_gain), FALSE, FALSE);
+
+	ui->master_dry_wet = robtk_dial_new_with_size(0.f, 1.f, 0.01f, ROUTE_WIDTH, 2*STEP_HEIGHT, DIAL_CX, STEP_HEIGHT, 2*DIAL_RADIUS);
+	robtk_dial_set_callback(ui->master_dry_wet, cb_set_master_dry_wet, ui);
+	rob_vbox_child_pack(ui->master_box, robtk_dial_widget(ui->master_dry_wet), FALSE, FALSE);
+	ui->lbl_master_dry_wet = robtk_lbl_new("Master Dry/Wet");
+	rob_vbox_child_pack(ui->master_box, robtk_lbl_widget(ui->lbl_master_dry_wet), FALSE, FALSE);
+
+
 	/*
 	printf("dry %x\n", robtk_lbl_widget(ui->lbl_dry));
 	printf("pitch %x\n", robtk_lbl_widget(ui->lbl_pitch));
@@ -789,7 +862,10 @@ cleanup(LV2UI_Handle handle)
 	robtk_lbl_destroy(ui->lbl_gain);
 
 	robtk_dial_destroy(ui->master_gain);
+	robtk_dial_destroy(ui->master_dry_wet);
 	robtk_lbl_destroy(ui->lbl_master_gain);
+	robtk_lbl_destroy(ui->lbl_master_dry_wet);
+
 	/*
 	cairo_surface_destroy(ui->bg_pitch_L);
 	cairo_surface_destroy(ui->bg_pitch_R);
@@ -853,6 +929,7 @@ port_event(LV2UI_Handle handle,
 		case HRM_GAIN_0:
 			robtk_scale_set_value(ui->gain[num], val);
 			adjust_master_gain(ui);
+			adjust_master_gain(ui);
 			break;
 		case HRM_MUTE_0:
 			robtk_cbtn_set_active(ui->mute[num], val>0.5);
@@ -871,6 +948,7 @@ port_event(LV2UI_Handle handle,
 		case HRM_DRY_GAIN:
 			robtk_scale_set_value(ui->dry_gain, val);
 			adjust_master_gain(ui);
+			adjust_master_dry_wet(ui);
 			break;
 		default:
 			break;
