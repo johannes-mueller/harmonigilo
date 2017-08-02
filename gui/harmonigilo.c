@@ -81,6 +81,7 @@ typedef struct {
 	PangoFontDescription* annotation_font;
 
 	bool disable_signals;
+	bool master_dry_wet_active;
 
 } HarmonigiloUI;
 
@@ -415,6 +416,13 @@ static float get_voice_sum_db(const HarmonigiloUI* ui)
 
 static void adjust_master_gain(HarmonigiloUI* ui)
 {
+	if (ui->master_dry_wet_active) {
+		printf("not adjusting master gain\n");
+		return;
+	}
+
+	printf("adjusting master gain\n");
+
 	float sum_gain = pow(10.f, robtk_scale_get_value(ui->dry_gain)/10.f);
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		sum_gain += pow(10.f, robtk_scale_get_value(ui->gain[i])/10.f);
@@ -509,6 +517,9 @@ static bool cb_set_gain(RobWidget* handle, void* data)
 	if (ui->disable_signals) {
 		return true;
 	}
+	printf("Enabling\n");
+	ui->master_dry_wet_active = false;
+
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		const float val = robtk_scale_get_value(ui->gain[i]);
 		ui->write(ui->controller, HRM_GAIN_0+(7*i), sizeof(float), 0, (const void*) &val);
@@ -562,6 +573,9 @@ static bool cb_set_dry_gain(RobWidget* handle, void* data)
 	if (ui->disable_signals) {
 		return true;
 	}
+	printf("Enabling\n");
+	ui->master_dry_wet_active = false;
+
 	const float val = robtk_scale_get_value(ui->dry_gain);
 	ui->write(ui->controller, HRM_DRY_GAIN, sizeof(float), 0, (const void*) &val);
 
@@ -613,10 +627,13 @@ static bool cb_set_master_gain(RobWidget* handle, void* data)
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		const float new_val = db_limits(robtk_scale_get_value(ui->gain[i]) - db_diff);
 		robtk_scale_set_value(ui->gain[i], new_val);
+		ui->write(ui->controller, HRM_GAIN_0+(7*i), sizeof(float), 0, (const void*) &new_val);
+
 	}
 
 	const float new_val = db_limits(robtk_scale_get_value(ui->dry_gain) - db_diff);
 	robtk_scale_set_value(ui->dry_gain, new_val);
+	ui->write(ui->controller, HRM_DRY_GAIN, sizeof(float), 0, (const void*) &new_val);
 
 	ui->disable_signals = false;
 	return true;
@@ -629,6 +646,9 @@ static bool cb_set_master_dry_wet(RobWidget* handle, void* data)
 		return true;
 	}
 
+	printf("Disabling\n");
+	ui->master_dry_wet_active = true;
+
 	const float dry_wet = robtk_dial_get_value(ui->master_dry_wet);
 	const float master_gain = from_dB(robtk_dial_get_value(ui->master_gain));
 
@@ -637,15 +657,17 @@ static bool cb_set_master_dry_wet(RobWidget* handle, void* data)
 
 	const float db_diff = sum_db - to_dB(dry_wet*master_gain);
 
-	printf("%s %f %f\n", __func__, dry_db, db_diff);
+	//printf("%s %f %f\n", __func__, dry_db, db_diff);
 
 	ui->disable_signals = true;
 
 	robtk_scale_set_value(ui->dry_gain, dry_db);
+	ui->write(ui->controller, HRM_DRY_GAIN, sizeof(float), 0, (const void*) &dry_db);
 
 	for (uint32_t i=0; i<CHAN_NUM; ++i) {
 		const float val = db_limits(robtk_scale_get_value(ui->gain[i]) - db_diff);
 		robtk_scale_set_value(ui->gain[i], val);
+		ui->write(ui->controller, HRM_GAIN_0+(7*i), sizeof(float), 0, (const void*) &val);
 	}
 
 	ui->disable_signals = false;
@@ -818,6 +840,7 @@ instantiate(void* const ui_toplevel,
 	robwidget_make_toplevel(ui->hbox, ui_toplevel);
 
 	ui->disable_signals = true;
+	ui->master_dry_wet_active = false;
 
 	return ui;
 }
@@ -912,7 +935,7 @@ port_event(LV2UI_Handle handle,
 
 	const uint32_t num = port/7;
 	if (num < CHAN_NUM) {
-		printf("Port: %d %d %d %f\n", port, port/4, port % 4, val);
+		//printf("Port: %d %d %d %f\n", port, port/4, port % 4, val);
 		switch ((PortIndex) (port % 7)) {
 		case HRM_ENABLED_0:
 			robtk_cbtn_set_active(ui->voice_enabled[num], val>0.5);
@@ -927,6 +950,7 @@ port_event(LV2UI_Handle handle,
 			robtk_dial_set_value(ui->pan[num], val);
 			break;
 		case HRM_GAIN_0:
+			printf("Voice gain %d: %f\n", num, val);
 			robtk_scale_set_value(ui->gain[num], val);
 			adjust_master_gain(ui);
 			adjust_master_gain(ui);
@@ -946,6 +970,7 @@ port_event(LV2UI_Handle handle,
 			robtk_dial_set_value(ui->dry_pan, val);
 			break;
 		case HRM_DRY_GAIN:
+			printf("Dry gain: %f\n", val);
 			robtk_scale_set_value(ui->dry_gain, val);
 			adjust_master_gain(ui);
 			adjust_master_dry_wet(ui);
