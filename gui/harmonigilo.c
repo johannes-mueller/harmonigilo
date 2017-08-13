@@ -23,10 +23,10 @@
 #include "src/harmonigilo.h"
 
 #define ROUTE_WIDTH  80.0
-#define STEP_HEIGHT 40.0
+#define STEP_HEIGHT 50.0
 #define DIAL_RADIUS 10.0
 #define DIAL_CX ROUTE_WIDTH/2
-#define DIAL_CY 15.0
+#define DIAL_CY 20.0
 #define ARROW_LENGTH 7.5
 
 #define RTK_URI HRM_URI
@@ -56,6 +56,7 @@ typedef struct {
 	RobTkCBtn* dry_mute;
 	RobTkCBtn* dry_solo;
 
+	RobTkLbl* lbl_voice_enabled;
 	RobTkLbl* lbl_pitch;
 	RobTkLbl* lbl_delay;
 	RobTkLbl* lbl_pan;
@@ -78,7 +79,13 @@ typedef struct {
 	cairo_surface_t* bg_pan[CHAN_NUM];
 	cairo_surface_t* bg_gain[CHAN_NUM];
 
+	cairo_surface_t* bg_dry_pan;
+	cairo_surface_t* bg_master_gain;
+	cairo_surface_t* bg_master_dry_wet;
+
+
 	PangoFontDescription* annotation_font;
+	PangoFontDescription* faceplate_font;
 
 	bool disable_signals;
 	bool master_dry_wet_active;
@@ -102,7 +109,7 @@ static void
 annotation_txt(HarmonigiloUI* ui, RobTkDial* d, cairo_t* cr, const char* txt) {
 	int tw, th;
 	cairo_save(cr);
-	PangoLayout * pl = pango_cairo_create_layout(cr);
+	PangoLayout* pl = pango_cairo_create_layout(cr);
 	pango_layout_set_font_description(pl, ui->annotation_font);
 	pango_layout_set_text(pl, txt, -1);
 	pango_layout_get_pixel_size(pl, &tw, &th);
@@ -153,16 +160,69 @@ static void draw_arrow(cairo_t* cr)
 	cairo_fill(cr);
 }
 
-static void pitch_faceplate(cairo_surface_t* s)
+static void annotate_dial_min_max(cairo_t* cr, const HarmonigiloUI* ui, const RobTkDial* d, const char* min, const char* max)
+{
+	PangoLayout* pl;
+	int tw, th;
+
+	pl = pango_cairo_create_layout(cr);
+	pango_layout_set_font_description(pl, ui->faceplate_font);
+	pango_layout_set_text(pl, min, -1);
+	pango_layout_get_pixel_size(pl, &tw, &th);
+
+	cairo_save(cr);
+	cairo_translate(cr, d->w_cx-d->w_radius-5.0-tw, d->w_cy+d->w_radius);
+	pango_cairo_show_layout(cr, pl);
+	g_object_unref(pl);
+	cairo_restore(cr);
+	cairo_new_path(cr);
+
+	pl = pango_cairo_create_layout(cr);
+	pango_layout_set_font_description(pl, ui->faceplate_font);
+	pango_layout_set_text(pl, max, -1);
+
+	cairo_save(cr);
+	cairo_translate(cr, d->w_cx+d->w_radius+5.0, d->w_cy+d->w_radius);
+	pango_cairo_show_layout(cr, pl);
+	g_object_unref(pl);
+	cairo_restore(cr);
+	cairo_new_path(cr);
+}
+
+static void draw_dial_ticks(cairo_t* cr, const RobTkDial* d)
+{
+	for (float s = 0.f; s<7.0; s+=1.f) {
+		const float ang = (0.75 * M_PI) + (1.5 * M_PI) * s/6.0;
+
+		cairo_save(cr);
+		cairo_translate(cr, d->w_cx, d->w_cy);
+		cairo_rotate(cr, ang);
+
+		cairo_move_to(cr, d->w_radius + 5.0, 0.f);
+		cairo_close_path(cr);
+		cairo_stroke(cr);
+		cairo_restore(cr);
+	}
+}
+
+static void dial_faceplate(cairo_surface_t* s, const HarmonigiloUI* ui, const RobTkDial* d, const char* min, const char* max, const float color[4])
 {
 	cairo_t* cr;
 	cr = cairo_create(s);
-	cairo_set_source_rgba(cr, .3, .4, .4, 1.0);
+	CairoSetSouerceRGBA(color);
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_rectangle(cr, 0, 0, ROUTE_WIDTH, STEP_HEIGHT);
 	cairo_fill(cr);
 
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+
+	cairo_set_line_width(cr, 2.5);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	CairoSetSouerceRGBA(c_g80);
+
+	annotate_dial_min_max(cr, ui, d, min, max);
+	draw_dial_ticks(cr, d);
+
 	CairoSetSouerceRGBA(c_g60);
 	cairo_set_line_width(cr, 1.0);
 	cairo_move_to(cr, ROUTE_WIDTH/2.0, 0);
@@ -175,7 +235,28 @@ static void pitch_faceplate(cairo_surface_t* s)
 	cairo_destroy(cr);
 }
 
-static void delay_faceplate(cairo_surface_t* s)
+static void master_dial_faceplate(cairo_surface_t* s, const HarmonigiloUI* ui, const RobTkDial* d, const char* min, const char* max, const float color[4])
+{
+	cairo_t* cr;
+	cr = cairo_create(s);
+	CairoSetSouerceRGBA(color);
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+	cairo_rectangle(cr, 0, 0, ROUTE_WIDTH, 2*STEP_HEIGHT);
+	cairo_fill(cr);
+
+	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+
+	cairo_set_line_width(cr, 2.5);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	CairoSetSouerceRGBA(c_g80);
+
+	annotate_dial_min_max(cr, ui, d, min, max);
+	draw_dial_ticks(cr, d);
+
+	cairo_destroy(cr);
+}
+
+static void delay_faceplate(cairo_surface_t* s, HarmonigiloUI* ui, RobTkDial* d)
 {
 	cairo_t* cr;
 	cr = cairo_create(s);
@@ -185,11 +266,22 @@ static void delay_faceplate(cairo_surface_t* s)
 	cairo_fill(cr);
 
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+
+	cairo_set_line_width(cr, 2.5);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	CairoSetSouerceRGBA(c_g80);
+
+	annotate_dial_min_max(cr, ui, d, "0", "50");
+	draw_dial_ticks(cr, d);
+
 	CairoSetSouerceRGBA(c_g60);
 	cairo_set_line_width(cr, 1.0);
 	cairo_move_to(cr, ROUTE_WIDTH/2.0, 0);
-	cairo_rel_line_to(cr, 0.0, DIAL_CY);
+	cairo_rel_line_to(cr, 0.0, STEP_HEIGHT);
 	cairo_stroke(cr);
+
+	cairo_move_to(cr, ROUTE_WIDTH/2.0, STEP_HEIGHT);
+	draw_arrow(cr);
 
 	cairo_destroy(cr);
 }
@@ -208,25 +300,10 @@ static void panner_width_faceplate(cairo_surface_t* s)
 
 static void create_faceplate(HarmonigiloUI* ui)
 {
-	/*
-	ui->bg_pitch_L = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
-	pitch_faceplate(ui->bg_pitch_L);
+	for (uint32_t i = 0; i < CHAN_NUM; ++i) {
 
-	ui->bg_pitch_R = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
-	pitch_faceplate(ui->bg_pitch_R);
+	}
 
-	ui->bg_delay_L = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
-	delay_faceplate(ui->bg_delay_L);
-
-	ui->bg_delay_R = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
-	delay_faceplate(ui->bg_delay_R);
-
-	ui->bg_panner_width = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
-	panner_width_faceplate(ui->bg_panner_width);
-
-	ui->bg_dry_wet = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
-	panner_width_faceplate(ui->bg_dry_wet);
-	*/
 	/*
 	CairoSetSouerceRGBA(c_g60);
 	cairo_move_to(cr, ROUTE_WIDTH, STEP_HEIGHT);
@@ -234,9 +311,7 @@ static void create_faceplate(HarmonigiloUI* ui)
 	cairo_rotate(cr, atan(STEP_HEIGHT/ROUTE_WIDTH));
 	draw_arrow(cr);
 	cairo_destroy(cr);
-	*/
 
-	/*
 	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 	CairoSetSouerceRGBA(c_g60);
 	cairo_set_line_width(cr, 1.0);
@@ -252,7 +327,6 @@ static void create_faceplate(HarmonigiloUI* ui)
 	draw_arrow(cr);
 	cairo_destroy(cr);
 	*/
-
 }
 
 static void
@@ -696,8 +770,9 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	ui->hbox = rob_hbox_new(FALSE, 2);
 
 	ui->annotation_font = pango_font_description_from_string("Mono 10px");
+	ui->faceplate_font = pango_font_description_from_string("Mono 8px");
 
-	//create_faceplate(ui);
+	create_faceplate(ui);
 	ui->ctable = rob_table_new(/*rows*/ 8, /*cols*/ CHAN_NUM+2, FALSE);
 	ui->ctable->expose_event = box_expose_event;
 
@@ -712,20 +787,29 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 		robtk_dial_set_default(ui->pitch[i], 0.0);
 		robtk_dial_set_callback(ui->pitch[i], cb_set_pitch, ui);
 		robtk_dial_annotation_callback(ui->pitch[i], dial_annotation_pitch, ui);
-		//robtk_dial_set_surface(ui->pitch[i], ui->bg_pitch[i]);
+		ui->bg_pitch[i] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
+		const float pitch_cl[4] = { .3, .4, .3, 1.};
+		dial_faceplate(ui->bg_pitch[i], ui, ui->pitch[i], "100", "-100", pitch_cl);
+		robtk_dial_set_surface(ui->pitch[i], ui->bg_pitch[i]);
 		rob_table_attach(ui->ctable, robtk_dial_widget(ui->pitch[i]), i+1,i+2, 1, 2, 0,0,RTK_EXPAND,RTK_SHRINK);
 
 		ui->delay[i] = make_sized_robtk_dial(0.0, 50.0, 1.0);
 		robtk_dial_set_default(ui->delay[i], 0.0);
 		robtk_dial_set_callback(ui->delay[i], cb_set_delay, ui);
 		robtk_dial_annotation_callback(ui->delay[i], dial_annotation_ms, ui);
-		//robtk_dial_set_surface(ui->delay[i], ui->bg_delay[i]);
+		ui->bg_delay[i] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
+		const float delay_cl[4] = { .3, .3, .4, 1.};
+		dial_faceplate(ui->bg_delay[i], ui, ui->delay[i], "0", "50", delay_cl);
+		robtk_dial_set_surface(ui->delay[i], ui->bg_delay[i]);
 		rob_table_attach(ui->ctable, robtk_dial_widget(ui->delay[i]), i+1,i+2, 2,3, 0,0,RTK_EXPAND,RTK_SHRINK);
 
 		ui->pan[i] = make_sized_robtk_dial(0.0, 1.0, 0.05);
 		robtk_dial_set_default(ui->pan[i], 0.5);
 		robtk_dial_set_callback(ui->pan[i], cb_set_pan, ui);
-		//robtk_dial_set_surface(ui->pan[i], ui->bg_pan[i]);
+		ui->bg_pan[i] = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
+		const float pan_cl[4] = { .4, .3, .3, 1.};
+		dial_faceplate(ui->bg_pan[i], ui, ui->pan[i], "L", "R", pan_cl);
+		robtk_dial_set_surface(ui->pan[i], ui->bg_pan[i]);
 		rob_table_attach(ui->ctable, robtk_dial_widget(ui->pan[i]), i+1,i+2, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK);
 
 		ui->sm_box[i] = rob_vbox_new(FALSE, 2);
@@ -752,9 +836,12 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	}
 
 	ui->dry_pan = make_sized_robtk_dial(0.0, 1.0, 0.05);
+	ui->bg_dry_pan = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, STEP_HEIGHT);
+	const float pan_cl[4] = { .4, .3, .3, 1.};
+	dial_faceplate(ui->bg_dry_pan, ui, ui->dry_pan, "L", "R", pan_cl);
 	robtk_dial_set_default(ui->dry_pan, 0.5);
 	robtk_dial_set_callback(ui->dry_pan, cb_set_dry_pan, ui);
-	//robtk_dial_set_surface(ui->dry_pan, ui->bg_pan);
+	robtk_dial_set_surface(ui->dry_pan, ui->bg_dry_pan);
 	rob_table_attach(ui->ctable, robtk_dial_widget(ui->dry_pan), 7,8, 3,4, 0,0,RTK_EXPAND,RTK_SHRINK);
 
 	ui->dry_sm_box = rob_vbox_new(FALSE, 2);
@@ -782,6 +869,8 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	ui->lbl_dry = robtk_lbl_new("Dry");
 	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_dry), 7,8, 0,1, 0,0,RTK_EXPAND,RTK_SHRINK);
 
+	ui->lbl_voice_enabled = robtk_lbl_new("Enable");
+	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_voice_enabled), 0,1, 0,1, 0,0,RTK_EXPAND,RTK_SHRINK);
 	ui->lbl_pitch = robtk_lbl_new("Pitch");
 	rob_table_attach(ui->ctable, robtk_lbl_widget(ui->lbl_pitch), 0,1, 1,2, 0,0,RTK_EXPAND,RTK_SHRINK);
 	ui->lbl_delay = robtk_lbl_new("Delay");
@@ -796,12 +885,20 @@ static RobWidget* setup_toplevel(HarmonigiloUI* ui)
 	ui->lbl_master_gain = robtk_lbl_new("Master Gain");
 	rob_vbox_child_pack(ui->master_box, robtk_lbl_widget(ui->lbl_master_gain), FALSE, FALSE);
 	ui->master_gain = robtk_dial_new_with_size(-60.f, +48.f, 0.1f, ROUTE_WIDTH, 2*STEP_HEIGHT, DIAL_CX, STEP_HEIGHT, 2*DIAL_RADIUS);
+	ui->bg_master_gain = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, 2*STEP_HEIGHT);
+	const float mg_cl[4] = { .4, .4, .3, 1.};
+	master_dial_faceplate(ui->bg_master_gain, ui, ui->master_gain, "-60", "+48", mg_cl);
+	robtk_dial_set_surface(ui->master_gain, ui->bg_master_gain);
 	robtk_dial_set_default(ui->master_gain, 0.f);
 	robtk_dial_annotation_callback(ui->master_gain, dial_annotation_db, ui);
 	robtk_dial_set_callback(ui->master_gain, cb_set_master_gain, ui);
 	rob_vbox_child_pack(ui->master_box, robtk_dial_widget(ui->master_gain), FALSE, FALSE);
 
 	ui->master_dry_wet = robtk_dial_new_with_size(0.f, 1.f, 0.01f, ROUTE_WIDTH, 2*STEP_HEIGHT, DIAL_CX, STEP_HEIGHT, 2*DIAL_RADIUS);
+	ui->bg_master_dry_wet = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, ROUTE_WIDTH, 2*STEP_HEIGHT);
+	const float mdw_cl[4] = { .3, .4, .4, 1.};
+	master_dial_faceplate(ui->bg_master_dry_wet, ui, ui->master_dry_wet, "dry", "wet", mdw_cl);
+	robtk_dial_set_surface(ui->master_dry_wet, ui->bg_master_dry_wet);
 	robtk_dial_set_callback(ui->master_dry_wet, cb_set_master_dry_wet, ui);
 	rob_vbox_child_pack(ui->master_box, robtk_dial_widget(ui->master_dry_wet), FALSE, FALSE);
 	ui->lbl_master_dry_wet = robtk_lbl_new("Master Dry/Wet");
@@ -879,6 +976,9 @@ cleanup(LV2UI_Handle handle)
 		robtk_cbtn_destroy(ui->mute[i]);
 		robtk_cbtn_destroy(ui->solo[i]);
 		rob_box_destroy(ui->sm_box[i]);
+		cairo_surface_destroy(ui->bg_pitch[i]);
+		cairo_surface_destroy(ui->bg_delay[i]);
+		cairo_surface_destroy(ui->bg_pan[i]);
 	}
 
 	robtk_dial_destroy(ui->dry_pan);
@@ -890,6 +990,7 @@ cleanup(LV2UI_Handle handle)
 
 	robtk_lbl_destroy(ui->lbl_dry);
 
+	robtk_lbl_destroy(ui->lbl_voice_enabled);
 	robtk_lbl_destroy(ui->lbl_pitch);
 	robtk_lbl_destroy(ui->lbl_delay);
 	robtk_lbl_destroy(ui->lbl_pan);
@@ -900,19 +1001,16 @@ cleanup(LV2UI_Handle handle)
 	robtk_lbl_destroy(ui->lbl_master_gain);
 	robtk_lbl_destroy(ui->lbl_master_dry_wet);
 
-	/*
-	cairo_surface_destroy(ui->bg_pitch_L);
-	cairo_surface_destroy(ui->bg_pitch_R);
-	cairo_surface_destroy(ui->bg_delay_L);
-	cairo_surface_destroy(ui->bg_delay_R);
-	cairo_surface_destroy(ui->bg_dry_wet);
-	cairo_surface_destroy(ui->bg_panner_width);
+	cairo_surface_destroy(ui->bg_master_dry_wet);
+	cairo_surface_destroy(ui->bg_master_gain);
 
+	/*
 	robtk_darea_destroy(ui->left_darea);
 	robtk_darea_destroy(ui->right_darea);
-
-	pango_font_description_free(ui->annotation_font);
 	*/
+	pango_font_description_free(ui->annotation_font);
+	pango_font_description_free(ui->faceplate_font);
+
 
 	rob_box_destroy(ui->master_box);
 	rob_box_destroy(ui->ctable);
