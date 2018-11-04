@@ -135,6 +135,7 @@ get_from_sample_buffer(SampleBuffer* sb, int rel_pos, float* dst, size_t len)
 	uint32_t pos = calc_sample_buffer_pos(sb, rel_pos);
 	if (pos < sb->write_pos && pos > sb->write_pos-len) {
 		const uint32_t d = len-(sb->write_pos-pos);
+		memset(dst, 0, d*sizeof(float));
 		memcpy(dst+d, sb->data+pos, (len-d)*sizeof(float));
 		sample_buffer_advance_read_pos(sb, len-d);
 		return;
